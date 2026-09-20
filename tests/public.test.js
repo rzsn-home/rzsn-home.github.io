@@ -40,10 +40,16 @@ test('all public assets, including i18n, are served; private paths are not',asyn
     assert.ok(homepage.includes('id="setup-continue"'),'setup has an explicit continue action');
     assert.ok(homepage.includes('id="theme-toggle"'),'header has a theme icon toggle');
     assert.ok(!homepage.includes('id="theme"'),'old theme select is removed');
+    assert.ok(homepage.includes('/assets/app.js?v=2026-09-20.9'),'entry module is cache-busted per production release');
     const appSource=await (await fetch(url+'/assets/app.js')).text();
     const cssSource=await (await fetch(url+'/assets/hub.css')).text();
     const configSource=await (await fetch(url+'/assets/config.js')).text();
+    const i18nSource=await (await fetch(url+'/assets/i18n.js')).text();
     const seasonLibrarySource=await (await fetch(url+'/assets/season-library.js')).text();
+    assert.ok(appSource.includes("./i18n.js?v=2026-09-20.9"),'language registry bypasses stale browser caches');
+    assert.ok(i18nSource.includes("./i18n-th.js?v=2026-09-20.9") && i18nSource.includes("./i18n-km.js?v=2026-09-20.9") && i18nSource.includes("./i18n-fil.js?v=2026-09-20.9"),'new language modules are cache-busted');
+    const languageRegistry=i18nSource.match(/export const LANGUAGES = \{([^;]+)\};/)?.[1] || '';
+    assert.equal((languageRegistry.match(/:'/g) || []).length,15,'production language registry exposes 15 languages');
     assert.ok(configSource.includes("adminUrl: '/admin/'"),'static build points at the encrypted admin route');
     assert.ok(!appSource.includes("'vs-sunday-prep'"),'Sunday VS renders only the primary guide image');
     assert.ok(appSource.includes('SEASON_LIBRARY_GUIDES') && appSource.includes('seasonLibraryDisclosure'),'app renders the complete Season guide library');
