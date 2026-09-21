@@ -1,12 +1,12 @@
 // Bundled translations. Column order for the seven base languages is stable.
-import AR from './i18n-ar.js';
-import KO from './i18n-ko.js';
-import SV from './i18n-sv.js';
-import PT from './i18n-pt.js';
-import NL from './i18n-nl.js';
-import TH from './i18n-th.js';
-import KM from './i18n-km.js';
-import FIL from './i18n-fil.js';
+import AR from './i18n-ar.js?v=2026-09-21.3';
+import KO from './i18n-ko.js?v=2026-09-21.3';
+import SV from './i18n-sv.js?v=2026-09-21.3';
+import PT from './i18n-pt.js?v=2026-09-21.3';
+import NL from './i18n-nl.js?v=2026-09-21.3';
+import TH from './i18n-th.js?v=2026-09-21.3';
+import KM from './i18n-km.js?v=2026-09-21.3';
+import FIL from './i18n-fil.js?v=2026-09-21.3';
 
 export const LANGUAGES = {de:'Deutsch',en:'English',uk:'Українська',ja:'日本語',fr:'Français',it:'Italiano',id:'Bahasa Indonesia',ar:'العربية',ko:'한국어',sv:'Svenska',pt:'Português',nl:'Nederlands',th:'ไทย',km:'ខ្មែរ',fil:'Filipino'};
 export const LOCALES = {de:'de-DE',en:'en-GB',uk:'uk-UA',ja:'ja-JP',fr:'fr-FR',it:'it-IT',id:'id-ID',ar:'ar-SA-u-ca-gregory',ko:'ko-KR',sv:'sv-SE',pt:'pt-PT',nl:'nl-NL',th:'th-TH-u-ca-gregory',km:'km-KH-u-ca-gregory',fil:'fil-PH'};

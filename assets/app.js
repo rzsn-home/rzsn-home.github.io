@@ -1,14 +1,14 @@
-import { BUILD_VERSION, ALLIANCE_CONFIG, LIVE_NOTICE } from './config.js';
-import { LANGUAGES, LOCALES, UI, resolveLanguagePreference, translate } from './i18n.js';
-import { COPY, TASKS, DAILY_GUIDES } from './content.js';
-import { DAY_ONE_GROUP, SEASON_COPY, SEASON_CONTENT, SEASON_GUIDES, seasonTasks, seasonSynergies, upcoming } from './season.js';
-import { GUIDE_COPY, GUIDE_TEXT, MEMBER_MEDIA } from './guide-text.js';
-import { SEASON_LIBRARY_COPY, SEASON_LIBRARY_GUIDES, SEASON_LIBRARY_MEDIA } from './season-library.js';
-import { TECH_GUIDE_HTML, TECH_GUIDE_TITLE } from './tech-guide.js';
-import { professionGuideHtml, PROFESSION_GUIDE_SEARCH } from './profession-guide.js';
-import { DAY_MS, WEEKDAYS, guideState, selectedDate, checklistKey, armsWindow, availableTask, enemyBusterPhase } from './engine.js';
-import { todayPriorities } from './priority.js';
-import { createStorage, checkedMap } from './storage.js';
+import { BUILD_VERSION, ALLIANCE_CONFIG, LIVE_NOTICE } from './config.js?v=2026-09-21.3';
+import { LANGUAGES, LOCALES, UI, resolveLanguagePreference, translate } from './i18n.js?v=2026-09-21.3';
+import { COPY, TASKS, DAILY_GUIDES } from './content.js?v=2026-09-21.3';
+import { DAY_ONE_GROUP, SEASON_COPY, SEASON_CONTENT, SEASON_GUIDES, seasonTasks, seasonSynergies, upcoming } from './season.js?v=2026-09-21.3';
+import { GUIDE_COPY, GUIDE_TEXT, MEMBER_MEDIA } from './guide-text.js?v=2026-09-21.3';
+import { SEASON_LIBRARY_COPY, SEASON_LIBRARY_GUIDES, SEASON_LIBRARY_MEDIA } from './season-library.js?v=2026-09-21.3';
+import { TECH_GUIDE_HTML, TECH_GUIDE_TITLE } from './tech-guide.js?v=2026-09-21.3';
+import { professionGuideHtml, PROFESSION_GUIDE_SEARCH } from './profession-guide.js?v=2026-09-21.3';
+import { DAY_MS, WEEKDAYS, guideState, selectedDate, checklistKey, armsWindow, availableTask, enemyBusterPhase } from './engine.js?v=2026-09-21.3';
+import { todayPriorities } from './priority.js?v=2026-09-21.3';
+import { createStorage, checkedMap } from './storage.js?v=2026-09-21.3';
 
 const dictionary = {...UI,...COPY,...SEASON_COPY,...GUIDE_COPY,...SEASON_LIBRARY_COPY};
 const escape = value => String(value).replace(/[&<>"']/g, char => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[char]));

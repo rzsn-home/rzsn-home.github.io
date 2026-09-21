@@ -1,6 +1,6 @@
-import { LIVE_NOTICE } from './config.js';
-import { DAILY_GUIDES } from './content.js';
-import { seasonSynergies, seasonTasks } from './season.js';
+import { LIVE_NOTICE } from './config.js?v=2026-09-21.3';
+import { DAILY_GUIDES } from './content.js?v=2026-09-21.3';
+import { seasonSynergies, seasonTasks } from './season.js?v=2026-09-21.3';
 export function todayPriorities(state, notice = LIVE_NOTICE) {
   const guide = DAILY_GUIDES[state.weekday];
   const tasks = [];

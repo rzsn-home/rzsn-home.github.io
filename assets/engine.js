@@ -1,4 +1,4 @@
-import { GUIDE_CONFIG } from './config.js';
+import { GUIDE_CONFIG } from './config.js?v=2026-09-21.3';
 export const DAY_MS = 86400000;
 export const WEEKDAYS = ['sunday','monday','tuesday','wednesday','thursday','friday','saturday'];
 const ordinal = date => Date.parse(`${date}T12:00:00Z`) / DAY_MS;
