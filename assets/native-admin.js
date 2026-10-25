@@ -759,6 +759,7 @@ function renderVs(target){
  const notices=[
   repeatCount>0?(enUi?repeatCount+' members repeatedly below the daily goal.':repeatCount+' Spieler wiederholt unter dem Tagesziel.'):null,
   participationWarnings>0?(enUi?participationWarnings+' members have too few active days with complete data.':participationWarnings+' Spieler mit zu wenigen aktiven Tagen bei vollständiger Erfassung.'):null,
+  week.beforeJoinDays>0?(enUi?week.beforeJoinDays+' missing days were before verified alliance joining dates and are not counted as zero or unclear.':week.beforeJoinDays+' fehlende Tage liegen vor belegten Allianzbeitritten und zählen weder als 0 noch als unklar.'):null,
   policy.shield_reminder_saturday?(enUi?'Saturday shield: remind manually; not automatically verified.':'Samstag: Schildpflicht manuell erinnern (nicht automatisch geprüft).'):null
  ].filter(Boolean);
  const kpi=(label,value,kind)=>'<div class="native-vs-kpi '+kind+'"><span>'+e(label)+'</span><strong>'+e(value)+'</strong></div>';

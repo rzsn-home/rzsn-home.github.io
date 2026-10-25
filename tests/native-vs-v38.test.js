@@ -38,6 +38,28 @@ test('No screenshot time inventing and no locale leakage to English',()=>{
  assert.match(mismatched.dayTiles,/100% captured/,'abnormal source totals cannot display above 100 percent');
 });
 
+test('Days before a verified W43 join are labeled, not given invented zero scores or image links',()=>{
+ const joined={id:'newcomer',name:'Newcomer',rank:'R1',failed:0,unknown:0,beforeJoin:4,activeDays:2,
+  days:Array.from({length:6},(_,weekday)=>weekday<4?
+   {weekday,quality:'before_join',eligible:false,verified:false,points:null}:
+   {weekday,quality:'observed',verified:true,points:12345,passed:false})};
+ const unresolved={id:'abdo',name:'ABDO M',rank:'R1',failed:0,unknown:2,beforeJoin:0,activeDays:4,
+  days:Array.from({length:6},(_,weekday)=>weekday<2?{weekday,quality:'missing',verified:false,points:null}:
+   {weekday,quality:'observed',verified:true,points:2000,passed:false})};
+ const week={week:'2026-W43',state:'final',members:[joined,unresolved],
+  dayTotals:Array.from({length:6},(_,weekday)=>({
+   weekday,passed:0,failed:weekday<4?0:1,unknown:weekday<2?1:0,beforeJoin:weekday<4?1:0
+  }))};
+ const view=renderVsOverview(week,{}, {esc,numberText:String,formatTime:fmt,language:'de'});
+ assert.match(view.dayTiles,/vor Beitritt/);
+ assert.match(view.groupsHtml,/Beitritt während der Woche/);
+ assert.match(view.groupsHtml,/Vor Beitritt/);
+ assert.equal((view.groupsHtml.match(/data-native-vs-image="2026-W43\|newcomer\|/g)||[]).length,2);
+ assert.equal((view.groupsHtml.match(/data-native-vs-image="2026-W43\|abdo\|/g)||[]).length,6);
+ assert.match(view.groupsHtml,/2 unklar/);
+ assert.doesNotMatch(view.groupsHtml,/0 Wochenpunkte/);
+});
+
 test('Weekly result comes only from six verified daily values, never imported leaderboard points',()=>{
  const days=Array.from({length:6},(_,weekday)=>({weekday,points:weekday===2?0:1000,quality:'observed'}));
  const result=derivedVsWeekTotal(days);

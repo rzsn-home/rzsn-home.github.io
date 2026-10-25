@@ -50,6 +50,10 @@ export function renderVsOverview(week,policy={},api={}){
   ['Noch keine Spieler für diese Woche.','No players recorded for this week.'],
   ['Unter Tagesziel','Below daily target'],
   ['Tagesziel erreicht','Daily goal reached'],
+  ['Beitritt während der Woche','Joined during week'],
+  ['Vor Beitritt','Before joining'],
+  ['vor Beitritt','before joining'],
+  ['nach Beitritt','after joining'],
   ['Tagesvergleich','Daily comparison'],
   ['bestätigte Werte','confirmed results'],
   ['bestätigte Tageswerte','confirmed daily results'],
@@ -84,7 +88,8 @@ export function renderVsOverview(week,policy={},api={}){
  const groups=[
   ['Unter Tagesziel',members.filter(p=>p.failed>0),'low'],
   ['Messwerte unvollständig',members.filter(p=>!p.failed&&p.unknown>0),'unknown'],
-  ['Tagesziel erreicht',members.filter(p=>!p.failed&&!p.unknown),'met']
+  ['Beitritt während der Woche',members.filter(p=>!p.failed&&!p.unknown&&p.beforeJoin>0),'joined'],
+  ['Tagesziel erreicht',members.filter(p=>!p.failed&&!p.unknown&&!p.beforeJoin),'met']
  ];
  const h='<div class="native-capture-banner '+(meta.captureKnown?'is-dated':'is-undated')+'">'+
   '<div class="native-capture-banner-main"><small>DATENSTAND · VS '+e(week.week)+'</small>'+
@@ -97,17 +102,19 @@ export function renderVsOverview(week,policy={},api={}){
   '<div class="native-intel-section-head"><h3>Tagesvergleich</h3><span>Mo–Sa · bestätigte Werte</span></div>'+
   '<div class="native-day-overview-grid">'+days.map((label,i)=>{
    const d=(week.dayTotals||[]).find(x=>x.weekday===i);
-   const pass=d?.passed??0,failed=d?.failed??0,unknown=d?.unknown??members.length;
+   const pass=d?.passed??0,failed=d?.failed??0,unknown=d?.unknown??members.length,beforeJoin=d?.beforeJoin??0;
+   const eligible=Math.max(0,members.length-beforeJoin);
    return '<article class="native-day-mini'+(failed?' has-failures':'')+'">'+
-    '<header><strong>'+label+'</strong><span>'+ (members.length?Math.min(100,Math.round(100*(pass+failed)/members.length)):0)+'% erfasst</span></header>'+
+    '<header><strong>'+label+'</strong><span>'+ (eligible?Math.min(100,Math.round(100*(pass+failed)/eligible)):0)+'% erfasst</span></header>'+
     '<strong class="native-day-mini-count">'+pass+'<small> Ziel erreicht</small></strong>'+
-    '<div class="native-day-mini-meta"><span class="bad">'+failed+' unter</span><span>'+unknown+' unklar</span></div>'+
+    '<div class="native-day-mini-meta"><span class="bad">'+failed+' unter</span><span>'+unknown+' unklar</span>'+(beforeJoin?'<span>'+beforeJoin+' vor Beitritt</span>':'')+'</div>'+
     '</article>';
   }).join('')+'</div></section>';
  const person=p=>{
   const failures=Number(p.failed||0),unknown=Number(p.unknown||0),active=p.activeDays;
-  const status=failures>=3?'is-critical':failures>0?'is-warning':unknown>0?'is-unknown':'is-okay';
-  const marker=failures?failures+'/6 unter Ziel':unknown?unknown+' unklar':'6/6 Ziel erreicht';
+  const status=failures>=3?'is-critical':failures>0?'is-warning':unknown>0?'is-unknown':p.beforeJoin>0?'is-joined':'is-okay';
+  const eligible=6-Number(p.beforeJoin||0);
+  const marker=failures?failures+'/'+eligible+' unter Ziel':unknown?unknown+' unklar':p.beforeJoin?eligible+'/'+eligible+' nach Beitritt':'6/6 Ziel erreicht';
   const computed=derivedVsWeekTotal(p.days);
   const weekly='<div class="native-player-weekline"><div><small>WOCHENPUNKTE</small>'+
    (computed.complete?
@@ -121,17 +128,19 @@ export function renderVsOverview(week,policy={},api={}){
    '<small>'+e(p.rank||'—')+' · '+(Number.isSafeInteger(active)?active:'?')+' aktive Tage</small></span>'+
    '<span class="native-vs-person-metrics"><b>'+e(marker)+'</b>'+
    (unknown?'<small>'+unknown+' unbekannt'+(computed.partial!==null?' · Teilstand '+n(computed.partial):'')+'</small>':
-    '<small>'+n(computed.total)+' Wochenpunkte</small>')+
+    computed.complete?'<small>'+n(computed.total)+' Wochenpunkte</small>':
+    '<small>'+n(computed.partial)+' Teilstand · '+Number(p.beforeJoin||0)+' vor Beitritt</small>')+
    '</span></summary><div class="native-vs-person-expanded">'+
    weekly+
    '<div class="native-vs-person-daygrid">'+days.map((day,i)=>{
     const item=(p.days||[]).find(x=>x.weekday===i);
-    const valid=item?.verified&&Number.isSafeInteger(item.points);
-    const label=valid?n(item.points):'Unbekannt';
-    return '<div class="native-vs-person-day '+(!valid?'is-unknown':item.passed?'is-good':'is-bad')+'">'+
-     '<span>'+day+'</span><button type="button" class="native-vs-day-link" data-native-vs-image="'+
+    const valid=item?.verified&&Number.isSafeInteger(item.points),beforeJoin=item?.quality==='before_join';
+    const label=valid?n(item.points):beforeJoin?'Vor Beitritt':'Unbekannt';
+    return '<div class="native-vs-person-day '+(beforeJoin?'is-before-join':!valid?'is-unknown':item.passed?'is-good':'is-bad')+'">'+
+     '<span>'+day+'</span>'+(beforeJoin?'<span class="native-muted">'+label+'</span>':
+     '<button type="button" class="native-vs-day-link" data-native-vs-image="'+
      e(week.week+'|'+p.id+'|'+i)+'" aria-label="VS-Beleg '+day+' für '+e(p.name)+'">'+
-     label+' ↗</button></div>';
+     label+' ↗</button>')+'</div>';
    }).join('')+'</div>'+
    '<button type="button" class="native-vs-open-person" data-native-member="'+e(p.id)+'">Spielerakte & Entwicklung öffnen ›</button>'+
    '</div></details>';
