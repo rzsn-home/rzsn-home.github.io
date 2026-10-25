@@ -3,7 +3,7 @@ export const GUIDE_CONFIG = {
   serverDayAnchor: { date: '2026-09-12', day: 144 },
   seasonStart: '2026-09-21T04:00:00+02:00', server: 2261,
 };
-export const BUILD_VERSION_BASE = '2026-10-23.63';
+export const BUILD_VERSION_BASE = '2026-10-25.1';
 const productionHost='rzsn-home.github.io';
 export const BUILD_VERSION = globalThis.location?.hostname===productionHost ? BUILD_VERSION_BASE : `${BUILD_VERSION_BASE}-staging`;
 export const ALLIANCE_CONFIG = {
@@ -11,7 +11,7 @@ export const ALLIANCE_CONFIG = {
   // Both authorized sites render the native admin view; Cloudflare D1 stays private.
   adminUrl: '#admin',
   commandCenterEmbedUrl: globalThis.location?.hostname===productionHost
-    ? 'https://rzsn-command-center.cynthiawong2837128.workers.dev/'
+    ? 'https://rzsn-command-center.cynthiawong2837128.workers.dev'
     : 'https://rzsn-staging-api-bridge.pages.dev/?embed=1',
 };
 export const LIVE_NOTICE = {

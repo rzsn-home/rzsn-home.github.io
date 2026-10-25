@@ -40,3 +40,10 @@ test('Both authorized sites mount native admin while the legacy wiki stays avail
   assert.ok(legacy.includes('id="unlock-form"'));
  }finally{await new Promise(resolve=>server.close(resolve))}
 });
+
+test('Production login calls the canonical API path',async()=>{
+ const config=await readFile(new URL('../assets/config.js',import.meta.url),'utf8');
+ const base=config.match(/'(https:\/\/rzsn-command-center\.cynthiawong2837128\.workers\.dev\/?)'/)?.[1];
+ assert.ok(base);
+ assert.equal(new URL(base+'/api/native-login').pathname,'/api/native-login');
+});
