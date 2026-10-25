@@ -10,7 +10,9 @@ export const ALLIANCE_CONFIG = {
   vsDailyMinimum: 3600000,
   // Both authorized sites render the native admin view; Cloudflare D1 stays private.
   adminUrl: '#admin',
-  commandCenterEmbedUrl: 'https://rzsn-staging-api-bridge.pages.dev/?embed=1',
+  commandCenterEmbedUrl: globalThis.location?.hostname===productionHost
+    ? 'https://rzsn-command-center.cynthiawong2837128.workers.dev/'
+    : 'https://rzsn-staging-api-bridge.pages.dev/?embed=1',
 };
 export const LIVE_NOTICE = {
   active: false, priority: 'critical',
