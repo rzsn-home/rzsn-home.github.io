@@ -32,13 +32,17 @@ test('all eight weeks and post season are calculated',()=>{
   }
 });
 test('DST fall-back and spring-forward use civil reset, not elapsed hours',()=>{
-  assert.equal(state('2026-10-25T03:59:00+01:00').date,'2026-10-24');
-  assert.equal(state('2026-10-25T04:00:00+01:00').date,'2026-10-25');
+  assert.equal(state('2026-10-25T02:59:00+01:00').date,'2026-10-24');
+  assert.equal(state('2026-10-25T03:00:00+01:00').date,'2026-10-25');
   assert.equal(state('2027-03-28T03:59:00+02:00').date,'2027-03-27');
   assert.equal(state('2027-03-28T04:00:00+02:00').date,'2027-03-28');
   assert.equal(resetInstant('2026-10-24').toISOString(),'2026-10-24T02:00:00.000Z');
-  assert.equal(resetInstant('2026-10-25').toISOString(),'2026-10-25T03:00:00.000Z');
-  assert.equal(seasonEventInstant(39).toISOString(),'2026-10-29T03:00:00.000Z');
+  assert.equal(state('2026-10-25T02:30:00+01:00').date,'2026-10-24');
+  assert.equal(state('2026-10-25T03:30:00+01:00').date,'2026-10-25');
+  assert.equal(state('2026-10-25T03:00:00+01:00').serverMinute,0);
+  assert.equal(state('2027-03-28T04:00:00+02:00').serverMinute,0);
+  assert.equal(resetInstant('2026-10-25').toISOString(),'2026-10-25T02:00:00.000Z');
+  assert.equal(seasonEventInstant(39).toISOString(),'2026-10-29T02:00:00.000Z');
 });
 test('test override and countdown',()=>{
   globalThis.__GUIDE_TEST_DATE__='2026-09-21T03:59:00+02:00';
@@ -46,7 +50,7 @@ test('test override and countdown',()=>{
   delete globalThis.__GUIDE_TEST_DATE__;
   assert.equal(state('2026-09-21T04:00:00+02:00').countdown,0);
 });
-test('checklists reset at 04:00; VS does not leak into next week',()=>{
+test('checklists reset at 00:00 ST (04:00 CEST / 03:00 CET) without VS week leakage',()=>{
   const before=state('2026-09-13T03:59:00+02:00'),after=state('2026-09-13T04:00:00+02:00');
   assert.equal(checklistKey('daily',before),'rzsn-daily-2026-09-12');
   assert.equal(checklistKey('daily',after),'rzsn-daily-2026-09-13');

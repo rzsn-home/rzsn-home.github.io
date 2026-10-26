@@ -993,6 +993,7 @@ const allianceEventLabels={
  zombie_siege:'Zombie Siege · Zombiebelagerung',
  desert_storm:'Desert Storm'
 };
+const verifiedProtocolStart=x=>String(x?.notes||'').startsWith('RZSN_GAME_LOG_START_CONFIRMED;');
 const allianceEventOutcomeLabels={
  scheduled:'Geplant',completed:'Abgeschlossen',failed:'Nicht geschafft',cancelled:'Abgesagt'
 };
@@ -1005,7 +1006,8 @@ export function summarizeAllianceEventRuns(source,type){
     String(b.updated_at||'').localeCompare(String(a.updated_at||'')));
  const historical=entries.filter(x=>x.outcome==='completed'||x.outcome==='failed');
  const completed=entries.filter(x=>x.outcome==='completed');
- const planned=entries.filter(x=>x.outcome==='scheduled');
+ const planned=entries.filter(x=>x.outcome==='scheduled'&&!verifiedProtocolStart(x));
+ const started=entries.filter(verifiedProtocolStart);
  const latest=historical[0]||null,previous=historical[1]||null;
  const number=x=>Number.isInteger(x)&&x>=1&&x<=999?x:null;
  const level=number(latest?.level),previousLevel=number(previous?.level);
@@ -1013,7 +1015,7 @@ export function summarizeAllianceEventRuns(source,type){
  const bestLevel=validLevels.length?Math.max(...validLevels):null;
  const waveValue=x=>Number.isInteger(x)&&x>=0&&x<=999?x:null;
  const waves=type==='zombie_siege'?waveValue(latest?.waves):null;
- return {type,entries,historical,completed,planned,latest,previous,
+ return {type,entries,historical,completed,planned,started,latest,previous,
   level,bestLevel,waves,deltaLevel:level!==null&&previousLevel!==null?level-previousLevel:null,
   confirmedCount:historical.length};
 }
@@ -1023,10 +1025,10 @@ function renderEventRuns(target){
  const german=officerLanguage(target.ownerDocument)==='de';
  const attendanceLabel=x=>Number.isInteger(x.attendance)?x.attendance+(german?' Teilnehmer · Offizierseintrag':' participants · officer entry'):(german?'Teilnahme nicht belegt':'Attendance not evidenced');
  const eventRow=x=>'<button type="button" class="native-event-history-row" data-native-edit="'+e(x.id)+'">'+
-  '<span><b>'+e(x.event_date)+'</b><small>'+e(allianceEventOutcomeLabels[x.outcome]||'Nicht bestätigt')+'</small></span>'+
+  '<span><b>'+e(x.event_date)+'</b><small>'+e(x.outcome==='scheduled'&&verifiedProtocolStart(x)?'Start nachgewiesen · Ergebnis offen':allianceEventOutcomeLabels[x.outcome]||'Nicht bestätigt')+'</small></span>'+
   '<span><strong>'+e(x.level??'—')+'</strong><small>Level</small></span>'+
   (x.event_type==='zombie_siege'?'<span><strong>'+e(x.waves??'—')+'</strong><small>Wellen</small></span>':'')+
-   '<span class="native-event-history-actor">'+e(names.get(x.lead_id)||'Leitung offen')+'<small>'+e(attendanceLabel(x))+'</small></span></button>';
+   '<span class="native-event-history-actor">'+e(names.get(x.lead_id)||'Leitung offen')+'<small>'+e(verifiedProtocolStart(x)?'Startender Spieler · '+attendanceLabel(x):attendanceLabel(x))+'</small></span></button>';
  const groups=['zombie_siege','marshall_guard'].map(type=>{
   const data=summarizeAllianceEventRuns(entries,type);
   const last=data.latest,latestLevel=data.level??'—';
@@ -1054,6 +1056,7 @@ function renderEventRuns(target){
      bars.map(x=>'<div><span class="native-event-bar '+(x.outcome==='failed'?'native-event-bar--failed':'')+'" style="height:'+Math.round(x.level/ceiling*100)+'%"></span>'+
       '<b>'+e(x.level)+'</b><small>'+e(x.event_date.slice(5))+'</small></div>').join('')+'</div>':
     '<p class="native-muted">Noch keine bestätigten Level für einen Verlauf vorhanden.</p>')+
+   (data.started.length?'<p class="native-muted">'+data.started.length+' protokollierte Starts · unbekannte Level bleiben offen; Starts allein beweisen keinen Abschluss.</p>':'')+
    '<details class="native-fold"><summary>Alle Durchgänge · '+data.entries.length+'</summary>'+
     '<div class="native-fold-body native-event-history">'+(data.entries.length?data.entries.map(eventRow).join(''):
     '<p class="native-muted">Noch keine erfassten Durchgänge.</p>')+'</div></details></section>';

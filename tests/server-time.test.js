@@ -21,11 +21,16 @@ test('public clock guidance uses Server Time in all 15 languages',()=>{
   }
 });
 
-test('Server Time is Berlin civil time minus four hours',()=>{
+test('Server Time uses 02:00 UTC reset, equivalent to 04:00 CEST and 03:00 CET',()=>{
   assert.equal(guideState(new Date('2026-09-14T04:00:00+02:00')).serverMinute,0);
   assert.equal(guideState(new Date('2026-09-14T12:00:00+02:00')).serverMinute,8*60);
   assert.equal(guideState(new Date('2026-09-14T20:00:00+02:00')).serverMinute,16*60);
   assert.equal(guideState(new Date('2026-09-15T00:00:00+02:00')).serverMinute,20*60);
+  assert.equal(guideState(new Date('2026-10-25T02:59:00+01:00')).serverMinute,23*60+59);
+  assert.equal(guideState(new Date('2026-10-25T03:00:00+01:00')).serverMinute,0);
+  assert.equal(guideState(new Date('2026-10-25T03:01:00+01:00')).serverMinute,1);
+  assert.equal(guideState(new Date('2027-03-28T03:59:00+02:00')).serverMinute,23*60+59);
+  assert.equal(guideState(new Date('2027-03-28T04:00:00+02:00')).serverMinute,0);
 });
 
 test('Arms Race windows are stored and evaluated in Server Time',()=>{

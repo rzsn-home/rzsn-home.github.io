@@ -19,6 +19,7 @@ test('Alliance event history preserves unknown levels, outcomes, waves and genui
   {id:'b',event_type:'zombie_siege',event_date:'2026-10-05',level:6,waves:null,outcome:'failed'},
   {id:'c',event_type:'zombie_siege',event_date:'2026-10-20',level:99,waves:20,outcome:'scheduled'},
   {id:'d',event_type:'marshall_guard',event_date:'2026-10-12',level:null,outcome:'completed'},
+  {id:'start-proof',event_type:'marshall_guard',event_date:'2026-10-22',level:null,outcome:'scheduled',notes:'RZSN_GAME_LOG_START_CONFIRMED; source_event_id=abc'},
   {id:'e',event_type:'zombie_siege',event_date:'invalid',level:8,outcome:'completed'}
  ];
  const siege=summarizeAllianceEventRuns(runs,'zombie_siege');
@@ -39,6 +40,9 @@ test('Alliance event history preserves unknown levels, outcomes, waves and genui
  assert.equal(guard.level,null);
  assert.equal(guard.waves,null);
  assert.equal(guard.deltaLevel,null);
+ assert.equal(guard.started.length,1);
+ assert.equal(guard.planned.length,0,'A confirmed start must not be displayed as a future scheduled event');
+ assert.equal(guard.confirmedCount,1,'Start is not proof that the event completed');
  assert.equal(summarizeAllianceEventRuns([{event_type:'zombie_siege',event_date:'2026-10-11',level:0,waves:null,outcome:'failed'}],'zombie_siege').waves,null);
 });
 

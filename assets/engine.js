@@ -13,10 +13,10 @@ export function berlinParts(now) {
   }).formatToParts(now).filter(p => p.type !== 'literal').map(p => [p.type,p.value]));
 }
 export function guideState(now = getGuideDate()) {
-  const p = berlinParts(now);
-  let date = `${p.year}-${p.month}-${p.day}`;
-  // Civil-date arithmetic, not elapsed 24h subtraction: correct across DST changes.
-  if (+p.hour < GUIDE_CONFIG.serverResetHour) date = new Date(Date.parse(`${date}T12:00:00Z`) - DAY_MS).toISOString().slice(0,10);
+  // Game midnight stays at 02:00 UTC. Berlin switches between 04:00 CEST
+  // and 03:00 CET; a fixed Berlin hour would be wrong for half the year.
+  const resetMinutes=GUIDE_CONFIG.serverResetUtcHour*60;
+  const date = new Date(now.getTime()-resetMinutes*60000).toISOString().slice(0,10);
   const start = berlinParts(new Date(GUIDE_CONFIG.seasonStart));
   const seasonDate = `${start.year}-${start.month}-${start.day}`;
   const delta = Math.round(ordinal(date) - ordinal(seasonDate));
@@ -28,8 +28,8 @@ export function guideState(now = getGuideDate()) {
     serverDay: GUIDE_CONFIG.serverDayAnchor.day + Math.round(ordinal(date)-ordinal(GUIDE_CONFIG.serverDayAnchor.date)),
     seasonDay, week, phase: !seasonDay ? 'PRE_SEASON' : week > 8 ? 'POST_SEASON' : `SEASON_WEEK_${week}`,
     countdown: Math.max(0, new Date(GUIDE_CONFIG.seasonStart) - now),
-    minute: +p.hour * 60 + +p.minute,
-    serverMinute: ((+p.hour * 60 + +p.minute) - GUIDE_CONFIG.serverResetHour * 60 + 1440) % 1440,
+    minute: (()=>{const p=berlinParts(now);return +p.hour*60 + +p.minute;})(),
+    serverMinute: ((now.getUTCHours()*60+now.getUTCMinutes())-resetMinutes+1440)%1440,
   };
 }
 export function selectedDate(state, weekdayIndex) {
@@ -56,14 +56,7 @@ export function availableTask(task, state) {
   return true;
 }
 export function resetInstant(date) {
-  let candidate=Date.parse(`${date}T${String(GUIDE_CONFIG.serverResetHour).padStart(2,'0')}:00:00Z`);
-  // Resolve a Berlin civil time without relying on the machine's own timezone.
-  for (let pass=0;pass<2;pass++) {
-    const parts=berlinParts(new Date(candidate));
-    const actualDate=`${parts.year}-${parts.month}-${parts.day}`;
-    candidate+=(Math.round(ordinal(date)-ordinal(actualDate))*1440+GUIDE_CONFIG.serverResetHour*60-(+parts.hour*60 + +parts.minute))*60000;
-  }
-  return new Date(candidate);
+  return new Date(`${date}T${String(GUIDE_CONFIG.serverResetUtcHour).padStart(2,'0')}:00:00Z`);
 }
 export function seasonEventInstant(day) {
   if (!Number.isInteger(day) || day<1) throw new RangeError('Season day must be a positive integer.');
