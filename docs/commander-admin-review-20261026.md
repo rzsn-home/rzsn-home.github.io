@@ -1,5 +1,36 @@
 # Commander-Admin: Bedienung und Browser-Prüfung am 26.10.2026
 
+## Umsetzung der nächsten fünf Prioritäten: 2026-10-26.6
+
+Die folgende Umsetzung ergänzt den darunter dokumentierten Ausgangsstand von Version .5:
+
+| Priorität | Umsetzung | Nachweis |
+| --- | --- | --- |
+| 1. Navigationskontext | Spielerakten kehren zum ursprünglichen VS-/Spendenbericht oder zur Mitgliederliste zurück. Ausgewählte Woche, Suche, Filter, aufgeklappte Bereiche, Scrollposition und auslösendes Bedienelement bleiben erhalten. Unterwerkzeuge behalten Allianz beziehungsweise Einsätze als Ausgangsbereich und bieten einen Rückweg. | Regressionen prüfen die ursprüngliche Berichtsanzeige, Filter, Fokus und ausbleibendes erneutes Laden; lokale Chrome-Bedienwege bestanden. |
+| 2. Berichtswochen | VS- und Spendenhinweise zeigen ihre eigene Woche, den Datenstatus und die vorhandene Aufnahmezeit. Fehlende Aufnahmezeiten bleiben ausdrücklich unbekannt. Datierte Konflikthinweise zeigen ihre Kalenderwoche und den Abrufzeitpunkt; die allgemeine OCR-Warteschlange ist als wochenübergreifend gekennzeichnet. | Getrennte Berichtswochen und unbekannte Aufnahmezeit im Cockpit sowie Datumswarnungen am Jahresanfang geprüft. |
+| 3. Mobile Bedienung | Kompakte Kontoauswahl ersetzt ständig sichtbare Zugangsschaltflächen. Mitglieder können nach aktiv/Archiv gefiltert werden; VS erhält eine Spielersuche. Mobile Eingabefelder verwenden mindestens 16 Pixel, Belegdialoge berücksichtigen die Bildschirmhöhe und den unteren sicheren Rand. | Lokaler Chrome bei 320/375/390/1365 Pixeln in hell/dunkel, jeweils mit synthetischer R4- und R5-Sitzung. |
+| 4. Statusanzeigen | Bekannte Zustände wie REVIEW, NULL, NO_CHECKPOINT, completed und former erhalten verständliche Anzeigenamen in 15 Sprachen. Originale API-Werte, Daten und Spielernamen bleiben erhalten. Auch Rollen in Konflikthinweisen und Statusänderungen im Protokoll werden verständlich angezeigt. | Sprachtests und synthetische Spielernamen mit REVIEW beziehungsweise NULL im Namen. |
+| 5. Belegdialoge | VS-, Profil- und Duellbelege verwenden dieselbe Fokussteuerung: Tab/Shift+Tab bleiben im Dialog, Escape schließt, Fokus kehrt zur Quelle zurück. Hintergrundscrollen wird währenddessen gesperrt und beim Schließen freigegeben. Ein verspätetes Duellbild öffnet einen geschlossenen Dialog nicht erneut. | Regressionen für Tastatur, Fokus, Scrollsperre und verspätete Bildantwort; echter lokaler Chrome-Bedienweg mit synthetischem Originalbild. |
+
+Rückwege und Berichtsdaten bleiben ausschließlich im Arbeitsspeicher der aktuellen Seite. Abmelden verwirft die Rückwege. Authentifizierung, Backend-Rechte und Datenbankschema wurden in diesem Paket nicht verändert.
+
+Prüfstand .6: 281 Frontend-Tests bestanden, keine Fehler oder Skips; Sprach-/Inhalts-/Syntaxvalidierung bestanden; npm audit 0 Schwachstellen. Zwei lokale Chrome-Bedienabläufe und 16 Kombinationen aus synthetischer Rolle, Bildschirmbreite und Darstellung bestanden. Die Release-Importmap und der Service-Worker sind gemeinsam auf 2026-10-26.6 gestempelt.
+
+### Grenzen der Rollen- und Geräteabnahme
+
+| Prüfung | Stand |
+| --- | --- |
+| Normale R4-UI mit synthetischer Sitzung | Lokal automatisiert geprüft; kein Nachweis für ein echtes R4-Konto. |
+| Separate R5-UI mit synthetischer Sitzung | Lokal automatisiert geprüft; kein Nachweis für ein echtes R5-Konto. |
+| Reales gewöhnliches R4-Konto ohne Eigentümerrechte | Weiterhin offen. |
+| Reales separates R5-Konto | Weiterhin offen. |
+| Echtes iPhone/Safari einschließlich Bildschirmtastatur und Dateiauswahl | Weiterhin offen. |
+| Frühere produktive Eigentümeranmeldung | Bezieht sich auf den darunter dokumentierten Stand .5 und ersetzt keine der offenen Rollenprüfungen. |
+
+Für die reale Rollenprüfung müssen insbesondere eigene Codeänderung, Erstellung beziehungsweise Zurücksetzung anderer Zugänge und serverseitige Ablehnung unberechtigter Schreibzugriffe getrennt geprüft werden. Die lokale Browserprüfung hat keine produktiven Konten, Messwerte oder Testdatensätze angelegt. Eine vollständige produktive Rollen- und iPhone-Abnahme ist damit ausdrücklich nicht erteilt.
+
+---
+
 Geprüft wurde die bestehende produktive Website in Chromium mit einer echten angemeldeten Website-Eigentümerin. Die Bewertung trennt vorhandene Bedienprobleme von den in Release 2026-10-26.5 korrigierten Fehlern. Private Originalbilder, Zugangsdaten und Browserprotokolle gehören nicht zu diesem Dokument.
 
 ## Ergebnis

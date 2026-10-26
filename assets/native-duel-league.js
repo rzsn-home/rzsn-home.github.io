@@ -1,5 +1,6 @@
 /** Native duel-league UI. Authentication and transport remain owned by native-admin.js. */
 import {duelCopy,duelEnumLabel} from './native-duel-league-i18n.js';
+import {bindEvidenceDialog} from './native-evidence-row.js';
 export const DUEL_DAY_WEIGHTS=Object.freeze([1,2,2,2,2,4]);
 const esc=value=>String(value??'').replace(/[&<>"']/g,char=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[char]));
 const list=value=>Array.isArray(value)?value:[];
@@ -94,9 +95,11 @@ function applyMatchProposal(form,item){const proposal=item.proposal||{};fill(for
 function applySnapshotProposal(form,item,copy){const proposal=item.proposal||{};fill(form,'proposal_id',item.id);fill(form,'evidence_ids',JSON.stringify(item.evidence_ids));fill(form,'cycle_label',proposal.cycle_label||item.scope_key);const container=form.querySelector('[data-native-dl-rank-rows]');container.innerHTML=list(proposal.rows).map(row=>rankRow(copy,row)).join('')||rankRow(copy)}
 export function createDuelLeagueController({root,api,language='de',cryptoRef=globalThis.crypto}={}){
  if(!root||!api)throw new TypeError('Duel & League root and API are required');const copy=duelCopy(language);let objectUrl='',data=normalizeDuelLeague({});
+ let releaseDialog=null,evidenceRequest=0;
+ const closeEvidence=()=>{evidenceRequest++;root.querySelector('.native-dl-evidence')?.replaceChildren();releaseDialog?.();releaseDialog=null;if(objectUrl)URL.revokeObjectURL(objectUrl);objectUrl=''};
  const status=(node,message,error=false)=>{if(node){node.textContent=message;node.classList.toggle('native-error',error)}};
  const errorMessage=(error,fallback)=>error?.localized?error.message:fallback;
- const load=async()=>{root.innerHTML='<p role="status">'+esc(copy.loading)+'</p>';try{data=normalizeDuelLeague(await api.read());root.innerHTML=renderDuelLeague(data,language)}catch(error){root.innerHTML='<p class="native-error" role="alert">'+esc(errorMessage(error,copy.readError))+'</p><button type="button" data-native-dl-reload>'+esc(copy.reload)+'</button>'}};
+ const load=async()=>{closeEvidence();root.innerHTML='<p role="status">'+esc(copy.loading)+'</p>';try{data=normalizeDuelLeague(await api.read());root.innerHTML=renderDuelLeague(data,language)}catch(error){root.innerHTML='<p class="native-error" role="alert">'+esc(errorMessage(error,copy.readError))+'</p><button type="button" data-native-dl-reload>'+esc(copy.reload)+'</button>'}};
  const save=async(form,call,payload)=>{const output=form.querySelector('[role=status]'),button=form.querySelector('[type=submit]');button.disabled=true;status(output,copy.saving);try{await call(payload);await load()}catch(error){status(output,errorMessage(error,copy.writeError),true);button.disabled=false}};
  root.addEventListener('click',async event=>{
   if(event.target.closest?.('[data-native-dl-reload]')){await load();return}
@@ -129,8 +132,16 @@ export function createDuelLeagueController({root,api,language='de',cryptoRef=glo
    return;
   }
   const review=event.target.closest?.('[data-native-dl-review-proposal]');if(review){const item=data.proposals.find(proposal=>proposal.id===review.dataset.nativeDlReviewProposal);if(!item)return;const selector=item.proposal_kind==='match_week'?'.native-dl-match-form':'.native-dl-snapshot-form',form=root.querySelector(selector);if(item.proposal_kind==='match_week'){prepareMatchReview(form,item.scope_key,data);applyMatchProposal(form,item)}else{resetReview(form);applySnapshotProposal(form,item,copy)}form.closest('details').open=true;form.scrollIntoView?.({block:'start'});return}
-   const evidence=event.target.closest?.('[data-native-dl-evidence]');if(evidence){const area=root.querySelector('.native-dl-evidence');status(area,copy.loading);try{const blob=await api.loadEvidence(evidence.dataset.nativeDlEvidence);if(objectUrl)URL.revokeObjectURL(objectUrl);objectUrl=URL.createObjectURL(blob);area.innerHTML='<div class="native-fold"><button type="button" data-native-dl-evidence-close>'+esc(copy.closeEvidence)+'</button><img src="'+esc(objectUrl)+'" alt="'+esc(copy.evidence)+'"></div>'}catch(error){status(area,errorMessage(error,copy.readError),true)}return}
-  if(event.target.closest?.('[data-native-dl-evidence-close]')){if(objectUrl)URL.revokeObjectURL(objectUrl);objectUrl='';root.querySelector('.native-dl-evidence').innerHTML=''}
+  const evidence=event.target.closest?.('[data-native-dl-evidence]');
+  if(evidence){
+   closeEvidence();const area=root.querySelector('.native-dl-evidence'),requestId=++evidenceRequest;
+   area.innerHTML='<section class="native-vs-evidence-backdrop" role="dialog" aria-modal="true" aria-label="'+esc(copy.evidence)+'"><div class="native-vs-evidence-panel"><button type="button" data-native-dl-evidence-close>'+esc(copy.closeEvidence)+'</button><p role="status">'+esc(copy.loading)+'</p></div></section>';
+   releaseDialog=bindEvidenceDialog(area.firstElementChild,closeEvidence,evidence);
+   try{const blob=await api.loadEvidence(evidence.dataset.nativeDlEvidence);if(requestId!==evidenceRequest||!area.isConnected)return;
+    objectUrl=URL.createObjectURL(blob);area.querySelector('[role=status]').outerHTML='<img src="'+esc(objectUrl)+'" alt="'+esc(copy.evidence)+'">';
+   }catch(error){if(requestId===evidenceRequest)status(area.querySelector('[role=status]'),errorMessage(error,copy.readError),true)}return;
+  }
+  if(event.target.closest?.('[data-native-dl-evidence-close]'))closeEvidence();
  });
  root.addEventListener('submit',async event=>{
   const form=event.target;if(!form.matches('.native-dl-match-form,.native-dl-snapshot-form'))return;event.preventDefault();if(!form.reportValidity()){status(form.querySelector('[role=status]'),copy.required,true);return}
@@ -138,5 +149,5 @@ export function createDuelLeagueController({root,api,language='de',cryptoRef=glo
   if(form.matches('.native-dl-snapshot-form')){await save(form,api.saveLeagueSnapshot,snapshotPayload(form,()=>idempotency(cryptoRef)));return}
 
  });
- return {load,destroy(){if(objectUrl)URL.revokeObjectURL(objectUrl);objectUrl=''}};
+ return {load,destroy:closeEvidence};
 }

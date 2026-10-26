@@ -26,6 +26,7 @@ test('iPhone More navigation offers direct grouped shortcuts and closes on tap',
   if(path==='/api/donations-intelligence')return Response.json(weekly);
   if(path==='/api/vs-intelligence')return Response.json({weeks:[]});
   if(path==='/api/members')return Response.json([{id,name:'Alpha',rank:'R4',power:0,kills:0,donations_weekly:22000}]);
+  if(path==='/api/member-registry')return Response.json({members:[],counts:{active:1,former:0,blacklisted:0}});
   if(path==='/api/member/'+id)return Response.json({member:{id,name:'Alpha',rank:'R4',status:'active'},stats:[
    {metric:'donations_weekly',value:22000,quality:'observed',captured_at:'2026-10-11T00:19:36+02:00'}
   ],weeks:[],days:[],rides:[],dice_wins:[],achievements:[]});
@@ -73,8 +74,25 @@ test('iPhone More navigation offers direct grouped shortcuts and closes on tap',
  q('#native-donation-search').value='';
  q('#native-donation-search').dispatchEvent(new dom.window.Event('input',{bubbles:true}));
  const btn=q('.native-donation-met [data-native-member]');
+ const donationsView=q('#native-admin-content');
  btn.click();
  await until(()=>q('.native-profile h3'));
  assert.equal(q('.native-profile h3').textContent,'Alpha');
  assert.match(q('.native-profile-metrics').textContent,/22.000/);
+ q('[data-native-member-close]').click();
+ await until(()=>q('.native-donation-groups'));
+ assert.equal(q('#native-admin-content'),donationsView,'Return restores the original report DOM');
+ assert.equal(q('#native-donation-week').value,'2026-W41');
+ assert.equal(dom.window.document.activeElement,btn,'Return restores the invoking player control');
+ assert.equal(calls.filter(path=>path==='/api/donations-intelligence').length,1,'Returning does not reload or change the report');
+ q('[data-officer-tab=members]').click();await until(()=>q('#native-member-search'));
+ q('#native-member-search').value='Alpha';q('#native-member-search').dispatchEvent(new dom.window.Event('input',{bubbles:true}));
+ const membersView=q('#native-admin-content'),registryButton=q('[data-officer-tab=registry]');
+ registryButton.click();await until(()=>q('#registry-search'));
+ assert.equal(q('.native-primary-tab[data-officer-tab=members]').getAttribute('aria-current'),'page');
+ assert.equal(q('.native-more-tab').hasAttribute('aria-current'),false);
+ q('[data-native-nav-back]').click();
+ assert.equal(q('#native-admin-content'),membersView);
+ assert.equal(q('#native-member-search').value,'Alpha');
+ assert.equal(dom.window.document.activeElement,registryButton);
 });

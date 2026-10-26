@@ -1,10 +1,10 @@
 /** Native Luna officer workspace. Private data is held only in a live memory token. */
 import {ALLIANCE_CONFIG} from './config.js';
 import {icon} from './icons.js';
-import {localizeOfficerTree,officerLanguage,officerLocale,translateOfficerText} from './native-admin-i18n.js';
+import {localizeOfficerTree,officerLanguage,officerLocale,translateOfficerText,officerStatusLabel} from './native-admin-i18n.js';
 import {buildOfficerActions} from './officer-cockpit.js';
 import {createStatEvidenceViewer} from './native-stat-evidence.js';
-import {renderEvidenceRow} from './native-evidence-row.js';
+import {renderEvidenceRow,bindEvidenceDialog} from './native-evidence-row.js';
 import {renderVsOverview,derivedVsWeekTotal} from './native-vs-overview.js';
 import {createDuelLeagueController} from './native-duel-league.js';
 import {duelCopy} from './native-duel-league-i18n.js';
@@ -17,7 +17,27 @@ let sessionToken='',officer=null,panel='overview',cache={},pageLimit=20,historyL
 let sessionGeneration=0;
 let duelLeagueController=null;
 let trainHistoryFilters={member:'',date:''},trainHistoryExpanded=false;
-export function clearOfficer(){sessionGeneration++;statViewer.close();clearReviewImages();duelLeagueController?.destroy();duelLeagueController=null;sessionToken='';officer=null;cache={};panel='overview';pageLimit=20;historyLimit=20;trainHistoryFilters={member:'',date:''};trainHistoryExpanded=false;activityLimit=30;registryFilter='all';activityCategory='all';activityGroupBy='type';}
+let navigationTrail=[],navigationGroup=null,profileReturn=null,memberFilter='all',vsDialogRelease=null;
+function rememberView(mount,trigger){
+ return {node:mount.firstElementChild,panel,cache:{...cache},group:navigationGroup,trigger,
+  scrollY:mount.ownerDocument.defaultView?.scrollY||0,
+  limits:[pageLimit,historyLimit,activityLimit],registryFilter,activityCategory,activityGroupBy,memberFilter};
+}
+function returnFocus(mount,entry){
+ if(entry.trigger?.isConnected)entry.trigger.focus({preventScroll:true});
+ const win=mount.ownerDocument.defaultView;
+ if(win&&win.scrollY!==entry.scrollY)win.scrollTo({top:entry.scrollY,behavior:'auto'});
+}
+function restoreView(mount,entry){
+ statViewer.close();clearReviewImages();duelLeagueController?.destroy();duelLeagueController=null;
+ panel=entry.panel;cache=entry.cache;navigationGroup=entry.group;
+ if(entry.trail)navigationTrail=entry.trail;
+ [pageLimit,historyLimit,activityLimit]=entry.limits;
+ registryFilter=entry.registryFilter;activityCategory=entry.activityCategory;activityGroupBy=entry.activityGroupBy;
+ memberFilter=entry.memberFilter;
+ mount.replaceChildren(entry.node);localizeOfficerTree(mount);returnFocus(mount,entry);
+}
+export function clearOfficer(){sessionGeneration++;statViewer.close();clearReviewImages();duelLeagueController?.destroy();duelLeagueController=null;sessionToken='';officer=null;cache={};panel='overview';navigationTrail=[];navigationGroup=null;profileReturn=null;memberFilter='all';pageLimit=20;historyLimit=20;trainHistoryFilters={member:'',date:''};trainHistoryExpanded=false;activityLimit=30;registryFilter='all';activityCategory='all';activityGroupBy='type';}
 export const hasOfficer=()=>Boolean(sessionToken);
 const canManageSite=()=>officer?.role==='R5'||(officer?.role==='R4'&&officer?.siteOwner===true);
 async function request(path,options={}){
@@ -56,7 +76,7 @@ const secondaryPanels=[
  ['reviews','OCR-Prüffälle'],['tasks','Admin-Aufgaben'],['absences','Abwesenheiten'],['events','Allianz-Events'],
  ['activity','Änderungsprotokoll'],['access','Zugangscodes'],['requirements','Einstellungen']
 ];
-const parentPanel=key=>({
+const parentPanel=key=>(key===panel&&navigationGroup)||({
  overview:'overview',vs:'vs',duelLeague:'vs',donations:'vs',members:'members',train:'train',more:'more',
  registry:'more',watch:'more',diplomacy:'more',reviews:'more',tasks:'more',
  absences:'more',events:'more',activity:'more',access:'more',requirements:'more'
@@ -113,16 +133,24 @@ function moreHub(){
 }
 function cards(items){return '<div class="native-cards">'+items.map(([name,value,sub])=>'<article><small>'+e(name)+'</small><strong>'+e(value)+'</strong><span>'+e(sub||'')+'</span></article>').join('')+'</div>'}
 function marker(status){return '<span class="native-status">'+e(status||'Unbekannt')+'</span>'}
+function reportContext(source={},language='de'){
+ const tr=value=>e(translateOfficerText(value,language));
+ const state=source.state?officerStatusLabel(source.state,language):tr(source.is_complete===true?'Vollständig':'Unbekannt');
+ return '<small class="native-report-context" data-native-report-context><span>'+tr('Woche')+'</span> <b>'+e(source.week||translateOfficerText('Unbekannt',language))+'</b> · '+
+  '<span>'+tr('Datenstand')+'</span>: '+state+' · '+
+  (source.captured_at?e(formatOfficerTime(source.captured_at)):tr('Aufnahmezeit unbekannt'))+'</small>';
+}
 async function view(mount){
+ statViewer.close();
  clearReviewImages();
  duelLeagueController?.destroy();duelLeagueController=null;
 
  const header='<div class="native-officer-strip" role="group" aria-label="Offiziersbereich">'+
   '<a class="native-return-link" href="#today">← Zur Website</a>'+
   '<div class="native-officer-controls"><span class="native-officer-badge">'+e(officer?.role||'Offizier')+' · '+e(officer?.name||'')+(officer?.siteOwner?' · Website-Eigentümerin':'')+
-  '</span><button type="button" data-officer-tab="access">Mein Zugang</button><button type="button" data-officer-logout>Abmelden</button></div></div>';
+  '</span><details class="native-account-menu"><summary>Mein Zugang</summary><div><button type="button" data-officer-tab="access">Offizierszugänge</button><button type="button" data-officer-logout>Abmelden</button></div></details></div></div>';
  mount.innerHTML='<section class="native-admin"><h1 class="sr-only">RZSN Command Center</h1>'+header+nav(mount.ownerDocument)+
-  (parentPanel(panel)==='more'&&panel!=='more'?'<div class="native-hub-return"><button type="button" data-officer-tab="more">← Weitere Verwaltung</button><span>'+e(secondaryPanels.find(([key])=>key===panel)?.[1]||'Verwaltung')+'</span></div>':'')+
+  (navigationTrail.length?'<div class="native-hub-return"><button type="button" data-native-nav-back '+(navigationTrail.at(-1).panel==='more'?'data-officer-tab="more"':'')+'>← <span>Zurück</span></button><span>'+e(secondaryPanels.find(([key])=>key===panel)?.[1]||'Verwaltung')+'</span></div>':'')+
   '<div class="native-admin-content" id="native-admin-content"><p>Daten werden geladen …</p></div></section>';
  const target=mount.querySelector('#native-admin-content');
  try{
@@ -141,7 +169,7 @@ async function view(mount){
     .sort((a,b)=>a.event_date.localeCompare(b.event_date))[0];
    const eventNames={marshall_guard:'Marshall Guard',zombie_siege:'Zombie Siege',desert_storm:'Desert Storm'};
    const trainLine=slot=>slot?(slot.entry?.driver
-    ? e(slot.entry.driver)+' · '+e(slot.entry.status||'Unbestätigt')
+    ? e(slot.entry.driver)+' · '+e(officerStatusLabel(slot.entry.status,officerLanguage(target.ownerDocument)))
     : 'Fahrer noch nicht eingetragen'):'Kein Eintrag im Wochenplan';
    const actions=buildOfficerActions({today:day,summary,operations:ops,trains,alerts,vs:cache.vs,donations:cache.donations});
    const enUi=officerLanguage(target.ownerDocument)!=='de';
@@ -158,9 +186,9 @@ async function view(mount){
    const urgent=actions.filter(item=>!['train-today','vs-open','donations-open'].includes(item.action)).slice(0,2);
    const actionPill=(key,label,count)=>'<button type="button" class="native-dashboard-quick-link" data-native-action="'+key+'">'+
      e(label)+(count!==undefined?'<b>'+e(count)+'</b>':'')+'</button>';
-   const summaryTile=(key,label,value,sub,shade)=>'<button type="button" class="native-dashboard-mini-tile '+shade+
+   const summaryTile=(key,label,value,sub,shade,source)=>'<button type="button" class="native-dashboard-mini-tile '+shade+
     '" data-native-action="'+key+'"><span>'+e(label)+'</span><strong>'+e(value)+'</strong>'+
-    '<small>'+e(sub)+'</small><span class="native-dashboard-tile-chevron" aria-hidden="true">›</span></button>';
+    '<small>'+e(sub)+'</small>'+reportContext(source,officerLanguage(target.ownerDocument))+'<span class="native-dashboard-tile-chevron" aria-hidden="true">›</span></button>';
    target.innerHTML='<div class="native-dashboard native-dashboard-v39">'+
     '<header class="native-command-header"><div><h2>'+word('Heute','Today')+'</h2>'+
       '<p>'+e(dateText)+'</p></div>'+
@@ -181,14 +209,16 @@ async function view(mount){
       '<b>'+e(nextEvent.event_date)+' · '+e(eventNames[nextEvent.event_type]||nextEvent.event_type||'Event')+'</b></div>':'')+
      (urgent.length?'<div class="native-command-alerts" aria-label="'+word('Offene Hinweise','Open alerts')+'">'+
        urgent.map(item=>'<button type="button" data-native-action="'+e(item.action)+'">'+
-        '<span>'+e(item.title)+'</span><small>'+e(item.detail)+'</small><b aria-hidden="true">›</b></button>').join('')+
+        '<span>'+e(item.title)+'</span><small>'+e(item.detail)+'</small>'+
+        (item.action==='review-open'?'<small class="native-report-context"><span>Alle Berichtswochen</span> · <span>Abgerufen</span>: '+e(formatOfficerTime(new Date().toISOString()))+'</small>':'')+
+        '<b aria-hidden="true">›</b></button>').join('')+
        '</div>':'')+
     '</section>'+
     '<section class="native-dashboard-signal-tiles" aria-label="'+word('Datenstatus','Data status')+'">'+
      summaryTile('vs-open',word('VS-Duell','Alliance Duel'),
-      vsAlert===null?'—':vsAlert,word('Spieler wiederholt unter Ziel','Members below target repeatedly'),'vs')+
+      vsAlert===null?'—':vsAlert,word('Spieler wiederholt unter Ziel','Members below target repeatedly'),'vs',alerts?.vs)+
      summaryTile('donations-open',word('Spenden','Donations'),
-      donationAlert===null?'—':donationAlert,word('Bestätigt unter Wochenziel','Confirmed below weekly goal'),'donations')+
+      donationAlert===null?'—':donationAlert,word('Bestätigt unter Wochenziel','Confirmed below weekly goal'),'donations',alerts?.donations)+
     '</section>'+
     renderImpactWarnings(ops.warnings||[],officerLanguage(target.ownerDocument))+
     (pending.length?'<section class="native-command-tasks"><div class="native-command-section-label"><strong>'+
@@ -281,14 +311,15 @@ async function view(mount){
     cache.members=[...list,...former];cache.archivedTrains=trains;
     cache.membersArchive=await formerArchiveFromTrain(trains,cache.members);
     cache.membersArchiveAvailable=Boolean(trains);
-   target.innerHTML='<div class="native-row"><h2>Allianzmitglieder</h2><input id="native-member-search" type="search" aria-label="Spieler suchen" placeholder="Spieler suchen" autocomplete="off"></div>'+
+   target.innerHTML='<div class="native-row native-member-toolbar"><h2>Allianzmitglieder</h2><input id="native-member-search" type="search" aria-label="Spieler suchen" placeholder="Spieler suchen" autocomplete="off">'+
+    '<label>Status<select id="native-member-filter">'+[['all','Alle'],['active','Aktiv'],['former','Archiv']].map(([value,label])=>'<option value="'+value+'" '+(memberFilter===value?'selected':'')+'>'+label+'</option>').join('')+'</select></label></div>'+
     '<p class="native-muted">Nach Rang sortiert. Spieler antippen: Profil, Messwerte, Wochenverlauf, Erfolge und Zug-Historie.</p><div id="native-member-list"></div>';
    renderMembers(target,'');
   }else if(panel==='vs'){
    const [data,summary]=await Promise.all([request('/api/vs-intelligence'),request('/api/overview')]);
    cache.vs=data;cache.overview=summary;
    target.innerHTML='<div class="native-vs-week-toolbar"><label>'+(officerLanguage(target.ownerDocument)==='de'?'Woche':'Week')+
-    ' <select id="native-vs-week">'+data.weeks.map(w=>'<option value="'+e(w.week)+'">'+e(w.week)+'</option>').join('')+'</select></label></div>'+
+    ' <select id="native-vs-week">'+data.weeks.map(w=>'<option value="'+e(w.week)+'">'+e(w.week)+'</option>').join('')+'</select></label><input type="search" id="native-vs-search" aria-label="Spieler suchen" placeholder="Spieler suchen" autocomplete="off"></div>'+
     '<div id="native-vs-body"></div>';renderVs(target);
   }else if(panel==='duelLeague'){
    target.innerHTML='<div id="native-duel-league-root"></div>';
@@ -350,9 +381,10 @@ function renderMembers(target,query=''){
  const records=Array.isArray(cache.members)?cache.members:[];
  const text=String(query).trim().toLocaleLowerCase('de-DE');
  const isFormer=m=>['former','archived','inactive'].includes(String(m.lifecycle||m.status||'').toLowerCase());
- const list=records.filter(m=>String(m.name||'').toLocaleLowerCase('de-DE').includes(text));
+ const list=records.filter(m=>String(m.name||'').toLocaleLowerCase('de-DE').includes(text)&&
+  (memberFilter==='all'||(memberFilter==='former'?isFormer(m):!isFormer(m))));
  const active=list.filter(m=>!isFormer(m)),realFormer=list.filter(isFormer);
- const historical=(cache.membersArchive||[]).filter(x=>String(x.name).toLocaleLowerCase('de-DE').includes(text));
+ const historical=memberFilter==='active'?[]:(cache.membersArchive||[]).filter(x=>String(x.name).toLocaleLowerCase('de-DE').includes(text));
  const opened=new Set([...host.querySelectorAll('details.native-rank-group[open]')].map(x=>x.dataset.rank));
  const initial=!host.querySelector('.native-rank-group');
  const firstRank=rankOrder.find(rank=>active.some(m=>(rankOrder.includes(m.rank)?m.rank:'Ungeklärt')===rank));
@@ -422,7 +454,7 @@ async function showPerson(target,id){
  try{p=await request('/api/member/'+encodeURIComponent(id))}
  catch(error){
   node.innerHTML='<p class="native-error" role="alert">Spielerakte konnte nicht geladen werden: '+e(error.message)+'</p>'+
-   '<button type="button" data-native-member="'+e(id)+'">Erneut versuchen</button>';
+   '<button type="button" data-native-member="'+e(id)+'">Erneut versuchen</button><button type="button" data-native-member-close>Zurück</button>';
   return;
  }
  const member=p.member||{},metrics=profileMetricChanges(p.stats||[]);
@@ -470,7 +502,7 @@ async function showPerson(target,id){
     'Bestätigter Teilstand: '+(computed.partial===null?'—':numberText(computed.partial))+' · '+computed.confirmed+'/6')+
     '</span></div>'+days.map(day=>'<div><span>'+e(weekdays[day.weekday]||'?')+'</span><button type="button" class="native-vs-day-link" data-native-vs-image="'+e(w.week+'|'+id+'|'+day.weekday)+'" title="Privaten Screenshot öffnen"><b>'+
     (['observed','corrected'].includes(day.quality)&&day.points!==null?numberText(day.points):'Unbekannt')+
-    '</b><small>'+e(day.quality||'nicht gelesen')+' · Bild ansehen</small></button></div>').join('')+'</div></details>';
+    '</b><small>'+e(officerStatusLabel(day.quality))+' · Bild ansehen</small></button></div>').join('')+'</div></details>';
  }).join('')+'</div>':
   '<p class="native-muted">Noch kein VS-Wochenverlauf vorhanden.</p>';
  const rides=(p.rides||[]).slice().sort((a,b)=>b.date.localeCompare(a.date));
@@ -479,7 +511,7 @@ async function showPerson(target,id){
  const line=(date,detail,sub)=>'<div><time>'+e(date)+'</time><b>'+e(detail)+'</b><small>'+e(sub||'')+'</small></div>';
  const historyCards='<div class="native-profile-metrics native-player-history-cards">'+
   '<details class="native-profile-metric-card"><summary><small>Zugfahrten</small><strong>'+rides.filter(x=>x.status==='completed').length+'</strong><span>Bestätigte Fahrten</span><em>Alle '+rides.length+' Einträge ansehen ›</em></summary>'+
-   '<div class="native-profile-timeline">'+(rides.length?rides.map(x=>line(x.date,x.type||'Zug',x.status||'')).join(''):'<p>Keine zugeordneten Fahrten</p>')+'</div></details>'+
+   '<div class="native-profile-timeline">'+(rides.length?rides.map(x=>line(x.date,x.type||'Zug',officerStatusLabel(x.status))).join(''):'<p>Keine zugeordneten Fahrten</p>')+'</div></details>'+
   '<details class="native-profile-metric-card"><summary><small>Dice Game</small><strong>'+dice.length+'</strong><span>Gewonnene Ziehungen</span><em>Gewinne anzeigen ›</em></summary>'+
    '<div class="native-profile-timeline">'+(dice.length?dice.map(x=>line(x.ride_date,'Dice Game gewonnen',x.roll_value===null?'Wurf unbekannt':'Wurf: '+x.roll_value)).join(''):'<p>Noch kein bestätigter Gewinn</p>')+'</div></details></div>';
  const achievementHtml=achievements.length?'<details class="native-fold"><summary>Erfolge & Meilensteine · '+achievements.length+'</summary>'+
@@ -487,7 +519,7 @@ async function showPerson(target,id){
    a.delta!==null&&a.delta!==undefined?deltaLabel(a.delta):'Bestätigte VS-Leistung')).join('')+'</div></details>':
   '<p class="native-muted">Noch keine nachweisbaren Meilensteine (+100.000 Kills, +1 Mio. Stärke oder 6/6 VS).</p>';
  node.innerHTML='<section class="native-profile"><div class="native-profile-header">'+
-  '<button type="button" class="native-back" data-native-member-close>← Alle Spieler</button>'+
+  '<button type="button" class="native-back" data-native-member-close>← <span>'+(profileReturn&&profileReturn.panel!=='members'?'Zurück':'Alle Spieler')+'</span></button>'+
   '<span class="native-profile-rank" aria-label="Allianzrang">'+e(member.rank||'?')+'</span>'+
   '<div class="native-profile-identity"><span class="native-kicker">SPIELERAKTE · '+e(member.status==='active'?'AKTIV':member.status==='former'?'ARCHIV':'STATUS UNGEKLÄRT')+'</span>'+
   '<h3>'+e(member.name||'Unbekannt')+'</h3><p>'+e(member.state_source==='registry'?'Verwalteter Rang':'Letzter importierter Rang')+
@@ -535,10 +567,11 @@ function showVsEvidenceUpload(area,key,message,source=null){
   '<button type="submit">Originalbild privat zuordnen</button>'+
   '<p role="status" class="native-vs-evidence-upload-result"></p></form>';
 }
-async function openVsScreenshot(target,key){
+async function openVsScreenshot(target,key,returnTo=target.querySelector('[data-native-vs-image="'+key+'"]')||target.ownerDocument.activeElement){
  const matched=/^(20\d{2}-W\d{2})\|([a-zA-Z0-9-]{1,80})\|([0-6])$/.exec(String(key));
  if(!matched)return;
  const [,week,memberId,weekday]=matched;
+ vsDialogRelease?.();vsDialogRelease=null;
  target.querySelector('#native-vs-evidence-viewer')?.remove();
  const host=target.ownerDocument.createElement('section');
  host.id='native-vs-evidence-viewer';
@@ -552,7 +585,10 @@ async function openVsScreenshot(target,key){
   '<div id="native-vs-evidence-image" class="native-stat-image" role="status">'+(weekday==='6'?'Wochenbeleg wird geprüft …':'Quellzeile wird ermittelt …')+'</div></div>';
  target.append(host);
  const area=host.querySelector('#native-vs-evidence-image');
- host.querySelector('[data-native-vs-image-close]')?.focus();
+ vsDialogRelease=bindEvidenceDialog(host,()=>{
+  host.remove();vsDialogRelease?.();vsDialogRelease=null;
+  for(const [imageKey,url] of reviewBlobUrls)if(imageKey.startsWith('vs:')){URL.revokeObjectURL(url);reviewBlobUrls.delete(imageKey)}
+ },returnTo);
  const sourcePath='/api/vs-source/'+encodeURIComponent(week)+'/'+encodeURIComponent(memberId)+'/'+weekday;
  let source=null;
  try{
@@ -780,12 +816,27 @@ function renderVs(target){
     kpi(enUi?'Perfect 6/6':'6 von 6',week.perfect??'—','perfect')+
   '</div>'+
   (notices.length?'<div class="native-vs-single-insight"><b>'+ (enUi?'Note':'Hinweis')+'</b>'+
-    '<span>'+notices.map(e).join(' · ')+'</span></div>':'')+
-  layout.dayTiles+layout.groupsHtml+
+    '<span>'+notices.map(e).join(' · ')+'</span>'+reportContext(week,officerLanguage(target.ownerDocument))+'</div>':'')+
+  layout.dayTiles+layout.groupsHtml+'<p data-native-vs-search-empty role="status" hidden>Keine Spieler gefunden.</p>'+
   '<details class="native-fold native-vs-explainer"><summary>'+ (enUi?'How are results assessed?':'Wie werden die Werte bewertet?')+'</summary>'+
    '<p class="native-fold-body native-muted">'+(enUi?'Weekly totals are calculated from six confirmed daily scores. Missing or unclear values are never zero; partial sums remain marked as incomplete.':'Die Wochensumme wird aus sechs bestätigten Tageswerten berechnet. Fehlende oder unklare Tage sind nie automatisch 0; Teilstände bleiben als unvollständig gekennzeichnet.')+'</p></details>'+
   '</section>';
-
+ filterVsMembers(target);
+}
+function filterVsMembers(target){
+ const query=String(target.querySelector('#native-vs-search')?.value||'').normalize('NFKC').trim().toLocaleLowerCase();
+ let matches=0;
+ for(const group of target.querySelectorAll('.native-vs-group')){
+  let count=0;
+  for(const row of group.querySelectorAll('.native-vs-player')){
+   row.hidden=!String(row.querySelector('.native-vs-person-main strong')?.textContent||'').normalize('NFKC').toLocaleLowerCase().includes(query);
+   if(!row.hidden)count++;
+  }
+  group.hidden=count===0;matches+=count;
+  if(query){if(!Object.hasOwn(group.dataset,'searchOpen'))group.dataset.searchOpen=String(group.open);group.open=true;}
+  else if(Object.hasOwn(group.dataset,'searchOpen')){group.open=group.dataset.searchOpen==='true';delete group.dataset.searchOpen;}
+ }
+ const empty=target.querySelector('[data-native-vs-search-empty]');if(empty)empty.hidden=!query||matches>0;
 }
 const trainWeekdays=['Montag','Dienstag','Mittwoch','Donnerstag','Freitag','Samstag','Sonntag'];
 const trainRideTypes=['R5','R4','Members Day','Donation King','VS Hero'];
@@ -916,7 +967,7 @@ function renderTrain(target){
  const slot=x=>'<article class="native-train-item '+(x.date===d.today?'native-train-today':'')+'">'+
   '<div><span class="native-kicker">'+(x.date===d.today?'HEUTE':e(x.date))+' · '+e(x.type||'Zug')+'</span>'+
   '<strong>'+e(x.entry?.driver||'Noch kein Fahrer eingetragen')+'</strong>'+
-  '<small>'+e(x.entry?.status||'Offen')+(x.entry?.linked===false?' · Zuordnung nicht verifiziert':'')+(x.unavailable_driver?' · Achtung: Abwesenheit eingetragen':'')+'</small>'+ (x.suggestions?.length?'<small class="native-train-recommendation">Vorschlag: '+e(x.suggestions[0].name)+' · '+e(x.suggestions[0].rank)+'</small>':'')+'</div>'+
+   '<small>'+e(x.entry?.status?officerStatusLabel(x.entry.status):'Offen')+(x.entry?.linked===false?' · Zuordnung nicht verifiziert':'')+(x.unavailable_driver?' · Achtung: Abwesenheit eingetragen':'')+'</small>'+ (x.suggestions?.length?'<small class="native-train-recommendation">Vorschlag: '+e(x.suggestions[0].name)+' · '+e(x.suggestions[0].rank)+'</small>':'')+'</div>'+
   '<div class="native-train-actions"><button type="button" data-native-train="'+e(x.date)+'">'+(x.entry?'Bearbeiten':'Fahrer wählen')+'</button>'+
   '<button type="button" data-native-dice-date="'+e(x.date)+'">🎲 '+e((cache.dice||[]).find(d=>d.ride_date===x.date)?.winner_name||'Dice Game')+'</button>'+
   (x.entry?.status==='planned'&&x.entry?.member_id&&(d.members||[]).some(m=>m.id===x.entry.member_id)?
@@ -1335,7 +1386,7 @@ export function historicalFormerRegistryEntries(entries=[],registered=[]){
  const combined=mergeFormerMemberRows(list,visibleHistorical);
  const rows=combined.slice(0,pageLimit).map(entry=>entry.kind==='member'?
   '<button type="button" data-registry-edit="'+e(entry.value.id)+'"><strong>'+e(entry.value.name)+' · '+e(entry.value.rank)+'</strong>'+
-   '<small>'+e(entry.value.lifecycle)+(entry.value.blacklisted?' · BLACKLIST':'')+' · zuletzt '+e(entry.value.last_seen||'?')+'</small></button>':
+   '<small>'+e(officerStatusLabel(entry.value.lifecycle))+(entry.value.blacklisted?' · Blacklist':'')+' · zuletzt '+e(entry.value.last_seen||'?')+'</small></button>':
   '<div class="native-archive-row native-registry-archive-row"><strong>'+e(entry.value.name)+'</strong>'+
    '<small>'+trans('Zugfahrt')+' · '+entry.value.ride_count+'×'+
    (entry.value.dates.length?' · '+e(entry.value.dates.join(', ')):'')+'</small></div>'
@@ -1438,7 +1489,8 @@ export function auditChanges(entry){
  if(!after)return [];
  return Object.keys(auditLabels).filter(key=>Object.hasOwn(after,key)&&
   (!before||JSON.stringify(before[key])!==JSON.stringify(after[key]))).map(key=>({
-  field:auditLabels[key],before:auditValue(before?.[key]),after:auditValue(after[key])
+  field:auditLabels[key],before:['status','lifecycle'].includes(key)&&before?.[key]!=null?officerStatusLabel(before[key]):auditValue(before?.[key]),
+  after:['status','lifecycle'].includes(key)?officerStatusLabel(after[key]):auditValue(after[key])
  }));
 }
 const activityTypes=[
@@ -1536,6 +1588,7 @@ function renderActivity(target,term=''){
 const reviewBlobUrls=new Map();
 const selectedProfileCaptures=new Map();
 function clearReviewImages(){
+ vsDialogRelease?.();vsDialogRelease=null;
  for(const url of reviewBlobUrls.values())try{URL.revokeObjectURL(url)}catch{}
  reviewBlobUrls.clear();
  selectedProfileCaptures.clear();
@@ -1856,6 +1909,9 @@ export function initNativeAdmin(mount){
  mount.lang=officerLanguage(mount.ownerDocument);
  mount.dir=mount.lang==='ar'?'rtl':'ltr';
  mount.addEventListener('click',async event=>{
+  if(event.target.closest?.('[data-native-nav-back]')){
+   const entry=navigationTrail.pop();if(entry)restoreView(mount,entry);return;
+  }
   if(event.target.closest?.('.native-train-history > summary')){
    trainHistoryExpanded=!event.target.closest('.native-train-history').open;
    return;
@@ -1876,7 +1932,7 @@ export function initNativeAdmin(mount){
   const proof=event.target.closest?.('[data-native-stat-evidence],[data-native-stat-close],[data-native-stat-prev],[data-native-stat-next],[data-native-stat-link],[data-native-stat-browse]');
   if(proof){
    const area=mount.querySelector('#native-admin-content');
-   if(proof.dataset.nativeStatEvidence)await statViewer.open(area,proof.dataset.nativeStatEvidence,proof.dataset.nativeStatMemberName);
+   if(proof.dataset.nativeStatEvidence)await statViewer.open(area,proof.dataset.nativeStatEvidence,proof.dataset.nativeStatMemberName,proof);
    else if(proof.hasAttribute('data-native-stat-close'))statViewer.close(area);
    else if(proof.hasAttribute('data-native-stat-browse'))await statViewer.step(0);
    else if(proof.hasAttribute('data-native-stat-prev'))await statViewer.step(-1);
@@ -1904,11 +1960,17 @@ export function initNativeAdmin(mount){
   if(button.hasAttribute('data-native-requirements-reload')){
    cache.requirements=await request('/api/alliance-requirements');renderRequirements(mount.querySelector('#native-admin-content'));return
   }
-  if(button.dataset.officerTab){panel=button.dataset.officerTab;pageLimit=20;historyLimit=20;activityLimit=30;await view(mount);
+  if(button.dataset.officerTab){
+   const next=button.dataset.officerTab;
+   if(secondaryPanels.some(([key])=>key===next)&&next!==panel){
+    navigationTrail.push(rememberView(mount,button));if(navigationTrail.length>12)navigationTrail.shift();navigationGroup=parentPanel(panel);
+   }else{navigationTrail=[];navigationGroup=null;}
+   profileReturn=null;panel=next;pageLimit=20;historyLimit=20;activityLimit=30;await view(mount);
    if(panel==='more')mount.querySelector('.native-hub-section h3')?.focus();
    return}
   if(button.dataset.nativeAction){
    const action=button.dataset.nativeAction;
+   navigationTrail=[];navigationGroup=null;profileReturn=null;
    panel=({ 'train-today':'train','event-planning':'events','member-find':'members','review-open':'reviews','tasks-open':'tasks','absences-open':'absences','vs-open':'vs','donations-open':'donations'})[action]||'overview';
    pageLimit=20;historyLimit=20;await view(mount);
    const destination=mount.querySelector('#native-admin-content');
@@ -1953,10 +2015,11 @@ export function initNativeAdmin(mount){
   const target=mount.querySelector('#native-admin-content');if(!target)return;
   if(button.hasAttribute('data-native-vs-image-close')){
    const modal=target.querySelector('#native-vs-evidence-viewer');modal?.remove();
+   vsDialogRelease?.();vsDialogRelease=null;
    for(const [key,url] of reviewBlobUrls)if(key.startsWith('vs:')){URL.revokeObjectURL(url);reviewBlobUrls.delete(key)}
    return;
   }
-  if(button.dataset.nativeVsImage){await openVsScreenshot(target,button.dataset.nativeVsImage);return}
+  if(button.dataset.nativeVsImage){await openVsScreenshot(target,button.dataset.nativeVsImage,button);return}
   if(button.dataset.nativeRegistryFilter){
    registryFilter=button.dataset.nativeRegistryFilter;
    target.querySelectorAll('[data-native-registry-filter]').forEach(item=>
@@ -1977,6 +2040,8 @@ export function initNativeAdmin(mount){
   }
   if(button.dataset.nativeWatchPerson){
    const id=button.dataset.nativeWatchPerson;
+   profileReturn=rememberView(mount,button);
+   profileReturn.trail=navigationTrail;navigationTrail=[];navigationGroup=null;
    panel='members';await view(mount);
    const memberTarget=mount.querySelector('#native-admin-content');
    if(memberTarget?.querySelector('#native-person'))await showPerson(memberTarget,id);
@@ -2019,17 +2084,21 @@ export function initNativeAdmin(mount){
   }
   if(button.dataset.registryEdit){editRegistry(target,button.dataset.registryEdit);return}
   if(button.dataset.nativeMember){
+   if(!profileReturn)profileReturn=rememberView(mount,button);
    if(panel!=='members'){
+    profileReturn.trail=navigationTrail;navigationTrail=[];navigationGroup=null;
     const id=button.dataset.nativeMember;panel='members';await view(mount);
     await showPerson(mount.querySelector('#native-admin-content'),id);
    }else await showPerson(target,button.dataset.nativeMember);
    return;
   }
   if(button.hasAttribute('data-native-member-close')){
+   if(profileReturn?.panel!=='members'&&profileReturn){const entry=profileReturn;profileReturn=null;restoreView(mount,entry);return;}
    const node=target.querySelector('#native-person');if(node)node.innerHTML='';
    const roster=target.querySelector('.native-member-folds');if(roster)roster.hidden=false;
    const header=target.querySelector('.native-row');if(header)header.hidden=false;
-   target.querySelector('#native-member-search')?.focus();return;
+   if(profileReturn){returnFocus(mount,profileReturn);profileReturn=null;}
+   else target.querySelector('#native-member-search')?.focus();return;
   }
   if(button.dataset.nativeAddAbsence){editProfileAbsence(target,button.dataset.nativeAddAbsence);return}
   if(button.dataset.nativeManage){
@@ -2142,6 +2211,7 @@ export function initNativeAdmin(mount){
   if(button.dataset.nativeNew||button.dataset.nativeEdit){editRecord(target,panel,button.dataset.nativeEdit||'');return}
  });
  mount.addEventListener('input',event=>{
+  if(event.target.id==='native-vs-search'){filterVsMembers(mount.querySelector('#native-admin-content'));return;}
   if(event.target.id==='native-train-history-member'||event.target.id==='native-train-history-date'){
    trainHistoryFilters[event.target.id==='native-train-history-member'?'member':'date']=event.target.value;
    historyLimit=20;updateTrainHistoryResults(mount.querySelector('#native-admin-content'));return;
@@ -2158,6 +2228,10 @@ export function initNativeAdmin(mount){
   }
  });
  mount.addEventListener('change',event=>{
+  if(event.target.id==='native-member-filter'){
+   memberFilter=['all','active','former'].includes(event.target.value)?event.target.value:'all';
+   const target=mount.querySelector('#native-admin-content');renderMembers(target,target.querySelector('#native-member-search')?.value||'');return;
+  }
   if(event.target.id==='native-train-history-date'){
    trainHistoryFilters.date=event.target.value;historyLimit=20;updateTrainHistoryResults(mount.querySelector('#native-admin-content'));return;
   }

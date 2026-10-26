@@ -83,6 +83,11 @@ test('VS priority is NOT OCR review count; VS player opens real dossier, history
  assert.match(q('.native-vs-single-insight').textContent,/29/);
  assert.match(q('[data-native-action=review-open]').textContent,/OCR 0/);
  assert.doesNotMatch(q('[data-native-action=review-open]').textContent,/29/);
+ const search=q('#native-vs-search');search.value='missing-name';search.dispatchEvent(new dom.window.Event('input',{bubbles:true}));
+ assert.equal(q('.native-vs-player').hidden,true);
+ assert.equal(q('[data-native-vs-search-empty]').hidden,false);
+ search.value='Synthetic';search.dispatchEvent(new dom.window.Event('input',{bubbles:true}));
+ assert.equal(q('.native-vs-player').hidden,false);
  q('.native-vs-group summary').click();
  await until(()=>q('[data-native-member="'+id+'"]'));
  assert.ok(q('[data-native-vs-image="2026-W41|'+id+'|0"]'));
@@ -90,6 +95,7 @@ test('VS priority is NOT OCR review count; VS player opens real dossier, history
  await until(()=>q('#native-vs-evidence-image img'));
  assert.ok(routes.includes('/api/vs-days/2026-W41/'+id+'/0/evidence'));
  q('[data-native-vs-image-close]').click();
+ const originalReport=q('#native-admin-content');
  q('[data-native-member="'+id+'"]').click();
  await until(()=>q('.native-profile h3'));
  assert.equal(q('.native-profile h3').textContent,member.name);
@@ -108,8 +114,9 @@ test('VS priority is NOT OCR review count; VS player opens real dossier, history
  assert.ok(routes.includes('/api/vs-days/2026-W40/'+id+'/0/evidence'));
  q('[data-native-vs-image-close]').click();
  q('[data-native-member-close]').click();
- await until(()=>q('#native-member-list')&&!q('.native-profile'));
- assert.ok(q('.native-rank-group').open);
+ await until(()=>q('#native-vs-body')&&!q('.native-profile'));
+ assert.equal(q('#native-admin-content'),originalReport);
+ assert.equal(q('#native-vs-search').value,'Synthetic');
  assert.ok(q('[data-native-member="'+id+'"]'));
 });
 

@@ -76,6 +76,13 @@ test('Alliance > Members includes archive section and keeps active rank separate
  assert.match(archive.querySelector('.native-archive-row').textContent,/Zugfahrt/);
  assert.deepEqual([...archive.querySelector('.native-rank-members').children].map(x=>x.querySelector('strong').textContent),['Archived Member','Old Rider'],'Former profile and train rider are alphabetically interleaved');
  assert.equal(postCount,0,'Historical listing never posts a fake member');
+ const filter=q('#native-member-filter');filter.value='active';filter.dispatchEvent(new dom.window.Event('change',{bubbles:true}));
+ assert.equal(q('.native-members-archive'),null);
+ assert.match(q('#native-member-list').textContent,/Current One/);
+ filter.value='former';filter.dispatchEvent(new dom.window.Event('change',{bubbles:true}));
+ assert.match(q('#native-member-list').textContent,/Archived Member/);
+ assert.doesNotMatch(q('#native-member-list').textContent,/Current One/);
+ filter.value='all';filter.dispatchEvent(new dom.window.Event('change',{bubbles:true}));
  const search=q('#native-member-search');search.value='Old Rider';
  search.dispatchEvent(new dom.window.Event('input',{bubbles:true}));
  await wait(()=>q('details.native-members-archive')?.open);

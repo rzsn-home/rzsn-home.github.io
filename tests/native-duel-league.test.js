@@ -33,6 +33,20 @@ const makeMatchForm=()=>{
  return {dom,form};
 };
 
+test('closing a duel evidence dialog cancels a late image and restores the invoking focus',async t=>{
+ const dom=new JSDOM('<main id="root"></main>');t.after(()=>dom.window.close());
+ const root=dom.window.document.querySelector('#root');let finish;
+ const pending=new Promise(resolve=>{finish=resolve});
+ const controller=createDuelLeagueController({root,api:{read:async()=>sample,loadEvidence:()=>pending},language:'en'});
+ await controller.load();const button=root.querySelector('[data-native-dl-evidence]');button.focus();button.click();
+ assert.ok(root.querySelector('[role=dialog]'));assert.equal(dom.window.document.body.style.overflow,'hidden');
+ root.querySelector('[data-native-dl-evidence-close]').dispatchEvent(new dom.window.KeyboardEvent('keydown',{key:'Escape',bubbles:true,cancelable:true}));
+ assert.equal(root.querySelector('[role=dialog]'),null);assert.equal(dom.window.document.activeElement,button);
+ finish(new Blob([new Uint8Array(80)],{type:'image/png'}));await new Promise(resolve=>setTimeout(resolve,0));
+ assert.equal(root.querySelector('.native-dl-evidence img'),null);
+ assert.equal(dom.window.document.body.style.overflow,'');controller.destroy();
+});
+
 test('renders exact overview safely in DE and EN without a backend-pending warning',()=>{
  const data=normalizeDuelLeague(sample);
  assert.deepEqual(data.matches[0].days.map(day=>day.vp_weight),DUEL_DAY_WEIGHTS);assert.equal(data.matches[0].days[1].our_score,null);

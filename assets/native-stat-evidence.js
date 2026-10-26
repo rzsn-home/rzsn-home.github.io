@@ -1,4 +1,4 @@
-import {renderEvidenceRow} from './native-evidence-row.js';
+import {renderEvidenceRow,bindEvidenceDialog} from './native-evidence-row.js';
 /** Private proof viewer: player + metric + snapshot must be an exact source match.
  * Candidate images are NEVER described as confirmed until an officer links a row.
  */
@@ -13,6 +13,7 @@ export function createStatEvidenceViewer({request,getToken,apiBase}){
  const close=target=>{
   clearBlob();
   active?.host?.remove();
+  active?.releaseDialog?.();
   active=null;
   target?.querySelector('#native-stat-evidence-viewer')?.remove();
  };
@@ -82,9 +83,9 @@ export function createStatEvidenceViewer({request,getToken,apiBase}){
    }
   }catch(e){if(active===state)host.querySelector('.native-stat-image').textContent=e.message}
  };
- const open=async(target,key,memberName='')=>{
+ const open=async(target,key,memberName='',returnTo=target.ownerDocument.activeElement)=>{
   const match=validKey(key);if(!match)return;
-  close(target);
+  const invoker=active?.returnTo||returnTo;close(target);
   const [,snap,member,metric]=match,base=PATH(snap,member,metric);
   const host=target.ownerDocument.createElement('section');
   host.id='native-stat-evidence-viewer';
@@ -98,8 +99,8 @@ export function createStatEvidenceViewer({request,getToken,apiBase}){
    '<div class="native-stat-image" role="status">Originalquelle wird geprüft …</div>'+
    '<div class="native-stat-body"></div></div>';
   target.append(host);
-  active={host,key,base,memberName,url:null,verifiedPreview:false,index:0,info:null};
-  host.querySelector('[data-native-stat-close]')?.focus();
+  active={host,key,base,memberName,returnTo:invoker,url:null,verifiedPreview:false,index:0,info:null};
+  active.releaseDialog=bindEvidenceDialog(host,()=>close(target),invoker);
   try{
    const info=await request(base);
    if(!active||active.host!==host)return;

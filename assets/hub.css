@@ -3,7 +3,7 @@
  * enrichment: original member-safe guide graphics · nav: N9 edge header + mobile bottom tabs · footer: Ft2
  * contrast: pass · mobile: pass 320/375/414/768 · slop: pass
  */
-@import url('./tokens.css?v=2026-10-26.5');
+@import url('./tokens.css?v=2026-10-26.6');
 *{box-sizing:border-box}
 html,body{overflow-x:clip}
 html{scroll-padding-block:1rem 6rem}
@@ -1420,6 +1420,23 @@ html[data-officer-mode='true'] .native-dashboard-heading{margin-top:.1rem}
  background:#f3eeeb;color:#273147;box-shadow:0 12px 32px rgba(0,0,0,.45)}
 .native-admin .native-vs-evidence-panel h3,.native-admin .native-vs-evidence-panel p{color:#26324b}
 .native-admin .native-vs-evidence-panel .native-evidence-note{color:var(--color-ink)}
+.native-report-context{display:block;line-height:1.5;white-space:normal;overflow-wrap:anywhere}
+.native-account-menu{position:relative;flex:0 0 auto}
+.native-account-menu>summary{min-height:44px;display:flex;align-items:center;gap:.35rem;cursor:pointer}
+.native-account-menu>div{position:absolute;inset-inline-end:0;z-index:30;display:grid;gap:.4rem;min-width:180px;padding:.6rem;background:var(--color-panel);border:1px solid var(--color-border);border-radius:8px;box-shadow:0 6px 20px #0004}
+.native-member-toolbar label{display:flex;align-items:center;gap:.4rem}
+@media(max-width:600px){
+ .native-admin .native-officer-strip{display:flex;flex-wrap:wrap;gap:.25rem;padding-block:.25rem}
+ .native-admin .native-officer-controls{width:100%;flex-wrap:nowrap;justify-content:space-between}
+ .native-admin .native-officer-badge{min-width:0;min-height:32px;max-width:65%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;display:block;padding-block:.4rem}
+ .native-admin .native-account-menu>summary{font-size:.8rem}
+ .native-admin input:not([type=checkbox]):not([type=radio]),.native-admin select,.native-admin textarea{font-size:16px}
+ .native-member-toolbar>h2{flex-basis:100%}
+ .native-member-toolbar>input{flex:1 1 150px;width:0;min-width:0}
+ .native-member-toolbar label{flex:0 1 120px;min-width:0}
+ .native-member-toolbar select{min-width:0;max-width:100%}
+ .native-admin .native-vs-evidence-panel{max-height:calc(100dvh - 1rem);overscroll-behavior:contain;padding-bottom:max(.8rem,env(safe-area-inset-bottom))}
+}
 .native-admin .native-vs-evidence-panel .native-muted{color:#53596c}
 .native-admin .native-vs-evidence-panel .native-row{flex-wrap:wrap}
 .native-admin #native-vs-evidence-image img{width:100%;max-height:65dvh;object-fit:contain;
