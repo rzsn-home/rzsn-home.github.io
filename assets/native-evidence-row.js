@@ -5,8 +5,10 @@ export function renderEvidenceRow(frame,blobUrl,source,alt,alive=()=>true){
   frame.innerHTML='<img alt="'+esc(alt)+'" draggable="false" loading="eager">';
   frame.querySelector('img').src=blobUrl;return;
  }
- frame.innerHTML='<p class="native-stat-row-identity"><strong>'+esc(source.member_name||source.source_name)+'</strong> · '+
+ frame.innerHTML='<p class="native-stat-row-identity"><strong data-native-no-translate>'+esc(source.member_name||source.source_name)+'</strong> · '+
   new Intl.NumberFormat('de-DE').format(source.source_value)+' Punkte</p>'+
+  (source.member_name&&source.source_name&&source.member_name!==source.source_name?
+   '<p class="native-muted native-stat-row-source" data-native-no-translate>OCR: '+esc(source.source_name)+'</p>':'')+
   '<div class="native-stat-row-window"><img alt="'+esc(alt)+'" draggable="false" loading="eager"></div>'+
   '<details class="native-stat-full-image"><summary>Vollständigen Screenshot ansehen</summary>'+
   '<img alt="Vollständiger privater Original-Screenshot" loading="lazy"></details>';

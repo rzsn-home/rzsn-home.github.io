@@ -41,10 +41,12 @@ export function createStatEvidenceViewer({request,getToken,apiBase}){
   return true;
  };
  const displayVerified=async()=>{
-  const {host,key,info,base}=active;
+  const {host,key,info,base,memberName}=active;
   const frame=host.querySelector('.native-stat-image');
   const proof=info.verified_source;
-  host.querySelector('.native-stat-body').innerHTML=['ocr_original_row','archive_ocr_row'].includes(proof.kind)
+  host.querySelector('.native-stat-body').innerHTML=['archive_profile_auto_qa_row','archive_capture_publication_row'].includes(proof.kind)
+   ?'<p class="native-evidence-note"><span>OCR-Herkunft, keine gesonderte Officer-Abnahme.</span> · '+safe(info.captured_at.slice(0,10))+'</p>'
+   :['ocr_original_row','archive_ocr_row'].includes(proof.kind)
    ?'<p class="native-evidence-note">Quellzeile aus dem ursprünglichen OCR-Import · '+
      safe(info.captured_at.slice(0,10))+' · '+safe(proof.id)+
      '. Name und Punkte wurden mit der originalen Bildposition abgeglichen.'+
@@ -52,7 +54,9 @@ export function createStatEvidenceViewer({request,getToken,apiBase}){
    :'<p class="native-evidence-note">Von einem Officer geprüfter Originalbeleg · '+safe(info.captured_at.slice(0,10))+'</p>';
   frame.textContent='Originalbild wird geladen …';
   try{await loadImage(base+'/image',info.verified_source.sha256,frame,
-   'Privater Original-Screenshot zum ausgewählten Spielerwert',info.verified_source)}
+   'Privater Original-Screenshot zum ausgewählten Spielerwert',{
+    ...info.verified_source,member_name:memberName||info.verified_source.member_name
+   })}
   catch(e){frame.textContent=e.message}
  };
  const candidate=async(index)=>{
@@ -78,7 +82,7 @@ export function createStatEvidenceViewer({request,getToken,apiBase}){
    }
   }catch(e){if(active===state)host.querySelector('.native-stat-image').textContent=e.message}
  };
- const open=async(target,key)=>{
+ const open=async(target,key,memberName='')=>{
   const match=validKey(key);if(!match)return;
   close(target);
   const [,snap,member,metric]=match,base=PATH(snap,member,metric);
@@ -94,7 +98,7 @@ export function createStatEvidenceViewer({request,getToken,apiBase}){
    '<div class="native-stat-image" role="status">Originalquelle wird geprüft …</div>'+
    '<div class="native-stat-body"></div></div>';
   target.append(host);
-  active={host,key,base,url:null,verifiedPreview:false,index:0,info:null};
+  active={host,key,base,memberName,url:null,verifiedPreview:false,index:0,info:null};
   host.querySelector('[data-native-stat-close]')?.focus();
   try{
    const info=await request(base);
@@ -136,7 +140,7 @@ export function createStatEvidenceViewer({request,getToken,apiBase}){
   message.textContent='Verifizierter Originalbeleg wird zugeordnet …';
   try{
    await request(s.base+'/link',{method:'POST',body:{capture_id:current.id,sha256:current.sha256,reason}});
-   if(active===s)await open(s.host.parentElement,s.key);
+   if(active===s)await open(s.host.parentElement,s.key,s.memberName);
   }catch(error){if(active===s){message.textContent='Nicht zugeordnet: '+error.message;btn.disabled=false}}
  };
  return {open,close,step,link};

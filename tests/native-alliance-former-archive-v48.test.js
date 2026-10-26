@@ -44,9 +44,11 @@ test('Alliance > Members includes archive section and keeps active rank separate
   if(p==='/api/officer-alerts')return Response.json({});
   if(p==='/api/members')return Response.json([
    {id:'a',name:'Current One',rank:'R5',status:'active',power:100},
-   {id:'b',name:'Archived Member',rank:'R4',status:'former'},
    {id:'c',name:'Current Two',rank:'R4',status:'active'}
   ]);
+  if(p==='/api/member-registry')return Response.json({members:[
+   {id:'b',name:'Archived Member',rank:'R4',lifecycle:'former'}
+  ]});
   if(p==='/api/train-manager')return Response.json({
    history:[],archivedFormerTrainDrivers:[item('Old Rider',[ '2026-09-01','2026-09-08']),item('Current One')],counts:{}
   });

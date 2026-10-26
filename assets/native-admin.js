@@ -41,9 +41,9 @@ async function binaryRequest(path,{method='GET',body,headers={}}={}){
 }
 const statViewer=createStatEvidenceViewer({request,getToken:()=>sessionToken,apiBase});
 const statEvidenceKey=(snapshot,member,metric)=>snapshot&&member&&['power','kills','donations_weekly'].includes(metric)?String(snapshot)+'|'+member+'|'+metric:'';
-const statValueButton=(value,snapshot,member,metric)=>{
+const statValueButton=(value,snapshot,member,metric,memberName='')=>{
  const key=statEvidenceKey(snapshot,member,metric);
- return key?'<button type="button" class="native-stat-value-link" data-native-stat-evidence="'+e(key)+'" title="Originalbild zum Spielerwert ansehen">'+numberText(value)+' <small aria-hidden="true">↗</small></button>':numberText(value);
+ return key?'<button type="button" class="native-stat-value-link" data-native-stat-evidence="'+e(key)+'" data-native-stat-member-name="'+e(memberName)+'" title="Originalbild zum Spielerwert ansehen">'+numberText(value)+' <small aria-hidden="true">↗</small></button>':numberText(value);
 };
 const options=(members,value='')=>'<option value="">Nicht besetzt</option>'+members.map(m=>'<option value="'+e(m.id)+'" '+(m.id===value?'selected':'')+'>'+e(m.name)+' · '+e(m.rank)+'</option>').join('');
 // Keep existing feature panel IDs and API workflows; the fifth main tab is a dedicated tile-based More page.
@@ -226,7 +226,7 @@ async function view(mount){
     [cache.registry,cache.archivedTrains]=await Promise.all([request('/api/member-registry'),request('/api/train-manager').catch(()=>null)]);
     await formerArchiveFromTrain(cache.archivedTrains,cache.registry.members);
    const historicalArchive=historicalFormerRegistryEntries(cache.archivedTrains?.archivedFormerTrainDrivers||[],cache.registry.members);
-   target.innerHTML='<div class="native-row"><h2>Mitgliederverwaltung</h2><button type="button" data-native-member-create>+ Mitglied anlegen</button><input id="registry-search" type="search" placeholder="Spieler suchen"></div>'+
+   target.innerHTML='<div class="native-row"><h2>Mitgliederverwaltung</h2><button type="button" data-native-member-create>+ Mitglied anlegen</button><input id="registry-search" type="search" aria-label="Spieler suchen" placeholder="Spieler suchen"></div>'+
     '<nav class="native-status-filter" aria-label="Mitgliederstatus">'+[['all','Alle'],['active','Aktiv'],['former','Archiv'],['blacklist','Blacklist']].map(([key,label])=>
     '<button type="button" data-native-registry-filter="'+key+'" aria-pressed="'+(registryFilter===key?'true':'false')+'">'+label+'</button>').join('')+'</nav>'+
     cards([['Aktiv',cache.registry.counts.active],['Archiv',Number(cache.registry.counts.former||0)+historicalArchive.length],['Blacklist',cache.registry.counts.blacklisted]])+
@@ -274,11 +274,14 @@ async function view(mount){
     '<label>Prüftyp <select id="review-kind-native"><option value="">Alle</option><option value="vs_day">VS-Tageswert</option><option value="identity">Identität</option><option value="profile">Profilwert</option></select></label></div></details>'+
     '<p id="native-review-finished" role="status" aria-live="polite"></p><div id="review-list-native"></div>';renderReviews(target,'');
   }else if(panel==='members'){
-    const [list,trains]=await Promise.all([request('/api/members'),request('/api/train-manager').catch(()=>null)]);
-    cache.members=list;cache.archivedTrains=trains;
-    cache.membersArchive=await formerArchiveFromTrain(trains,list);
+    const [list,trains,registry]=await Promise.all([request('/api/members'),request('/api/train-manager').catch(()=>null),request('/api/member-registry').catch(()=>null)]);
+    const knownIds=new Set(list.map(member=>member.id));
+    const former=(registry?.members||[]).filter(member=>member.lifecycle==='former'&&!knownIds.has(member.id))
+     .map(member=>({...member,status:'former'}));
+    cache.members=[...list,...former];cache.archivedTrains=trains;
+    cache.membersArchive=await formerArchiveFromTrain(trains,cache.members);
     cache.membersArchiveAvailable=Boolean(trains);
-   target.innerHTML='<div class="native-row"><h2>Allianzmitglieder</h2><input id="native-member-search" type="search" placeholder="Spieler suchen" autocomplete="off"></div>'+
+   target.innerHTML='<div class="native-row"><h2>Allianzmitglieder</h2><input id="native-member-search" type="search" aria-label="Spieler suchen" placeholder="Spieler suchen" autocomplete="off"></div>'+
     '<p class="native-muted">Nach Rang sortiert. Spieler antippen: Profil, Messwerte, Wochenverlauf, Erfolge und Zug-Historie.</p><div id="native-member-list"></div>';
    renderMembers(target,'');
   }else if(panel==='vs'){
@@ -443,7 +446,7 @@ async function showPerson(target,id){
    '<small>'+e(m.deltaSinceFirst===null?'Erst eine bestätigte Aufnahme – noch kein Langzeitvergleich':
     'Seit '+m.firstDate+': '+(m.deltaSinceFirst>0?'+':'')+numberText(m.deltaSinceFirst))+'</small>'+
    '<small>'+e(metricQuality[m.quality]||'Bestätigt')+' · '+e(m.date)+'</small><em>Alle '+timeline.length+' Messungen anzeigen ›</em></summary>'+
-   '<div class="native-profile-timeline">'+timeline.map((s,i)=>'<div><time>'+e(String(s.captured_at).slice(0,10))+'</time><b>'+statValueButton(s.value,s.snapshot_id,id,s.metric)+'</b>'+
+   '<div class="native-profile-timeline">'+timeline.map((s,i)=>'<div><time>'+e(String(s.captured_at).slice(0,10))+'</time><b>'+statValueButton(s.value,s.snapshot_id,id,s.metric,member.name)+'</b>'+
      '<small>'+e(i+1<timeline.length?deltaLabel(s.value-timeline[i+1].value):'Erste Messung')+'</small></div>').join('')+'</div></details>';
  }).join('')+'</div>':
   '<p class="native-muted">Noch keine bestätigten Messungen. Fehlende Werte werden nicht als Null bewertet.</p>';
@@ -705,7 +708,7 @@ function renderDonations(target,query=''){
    '<div class="native-fold-body">'+(n?players.map((m,i)=>
     '<article class="native-donation-person"><div class="native-donation-person-head">'+
     '<strong>'+e(m.name)+'</strong><small>'+e(m.rank||'?')+'</small><b>'+
-    (m.points===null?'Unbekannt':statValueButton(m.points,m.snapshot_id||week.snapshot_id,m.id,'donations_weekly'))+'</b></div>'+
+    (m.points===null?'Unbekannt':statValueButton(m.points,m.snapshot_id||week.snapshot_id,m.id,'donations_weekly',m.name))+'</b></div>'+
     (m.points===null?'<p class="native-muted">Unbekannte Spenden sind keine 0.</p>':
     '<div class="native-donation-progress" role="progressbar" aria-label="Anteil zum Wochenziel" aria-valuemin="0" aria-valuemax="100" aria-valuenow="'+Math.min(100,Math.round(m.points/minimum*100))+'">'+
     '<span style="width:'+Math.min(100,Math.round(m.points/minimum*100))+'%"></span></div>'+
@@ -1224,16 +1227,16 @@ function renderMembershipWatch(target){
  const data=cache.watch||{},host=target.querySelector('#native-watch-list');if(!host)return;
  const count=membershipWatchSummary(data),list=data.candidates||[];
  const policy=cache.archiveEligibility;
- const autoArchiveHint=policy?'<p class="native-evidence-note"><strong>Automatisches Archiv nach zwei Wochen:</strong> '+
-  (policy.ready?'W39/W40/W41-Regel aktiv: '+(policy.candidates?.length||0)+' bestätigte Kandidaten; Wochensnapshots final und Profilaufnahme vollständig.':
-    'Sicherheitsprüfung wartet: '+e(policy.reason||'Weitere finalisierte Vergleiche notwendig')+'.')+
-  ' Der nächtliche Staging-Abgleich archiviert nur nach zwei aufeinanderfolgenden fehlenden VS-Wochen und zusätzlichem Fehlen im vollständigen neuesten Mitglieder-Screenshot. R4/R5 werden niemals automatisch archiviert.</p>':'';
+ const autoArchiveHint=policy?'<p class="native-evidence-note"><strong>Mitglieder-Abgleich</strong> · '+
+  '<span>'+(policy.ready?'Bereit':'Weitere finalisierte Vergleiche notwendig')+'</span> · '+
+  '<span>Prüfkandidaten</span>: '+(policy.candidates?.length||0)+
+  '<br><span>Austritte und Rückkehr werden aus zwei vollständig bestätigten Profilbeständen aufeinanderfolgender Wochen ermittelt. VS-Punkte und Allianzlogs allein ändern den Status nicht.</span></p>':'';
  const snapshotInfo=(data.profile?.current?.captured_at?'Stärke '+data.profile.current.captured_at.slice(0,10):'Stärke ohne Vergleich')+
   ' · '+(data.vs?.current?.week?'VS '+data.vs.current.week:'VS ohne Vergleich');
  host.innerHTML='<p class="native-muted">'+e(snapshotInfo)+' · Quellen sind unterschiedlich vollständig</p>'+autoArchiveHint+
   cards([['Prüfkandidaten',count.count],['In beiden Listen fehlend',count.both],
    ['Im Stärke-Snapshot fehlend',count.profile],['In VS-Liste fehlend',count.vs]])+
-  '<p class="native-evidence-note"><strong>Kein automatischer Austritt:</strong> Fehlt ein Spieler auf einem Screenshot, bleibt er aktiv. Bei fehlenden Daten ist keine Blacklist zulässig. Status und Blacklist werden ausschließlich manuell in der Spielerakte geändert.</p>'+
+  '<p class="native-evidence-note"><span>Einzelne fehlende Bilder oder Werte belegen keinen Austritt. Die Blacklist wird nur manuell mit Begründung geändert.</span></p>'+
   (data.state==='insufficient_history'?
    '<p class="native-muted">Für einen verlässlichen Vergleich benötigen wir mindestens zwei vollständige Profil-Aufnahmen oder zwei abgeschlossene VS-Wochen.</p>':
    list.length?'<div class="native-list native-watch-candidates">'+list.map(m=>
@@ -1873,7 +1876,7 @@ export function initNativeAdmin(mount){
   const proof=event.target.closest?.('[data-native-stat-evidence],[data-native-stat-close],[data-native-stat-prev],[data-native-stat-next],[data-native-stat-link],[data-native-stat-browse]');
   if(proof){
    const area=mount.querySelector('#native-admin-content');
-   if(proof.dataset.nativeStatEvidence)await statViewer.open(area,proof.dataset.nativeStatEvidence);
+   if(proof.dataset.nativeStatEvidence)await statViewer.open(area,proof.dataset.nativeStatEvidence,proof.dataset.nativeStatMemberName);
    else if(proof.hasAttribute('data-native-stat-close'))statViewer.close(area);
    else if(proof.hasAttribute('data-native-stat-browse'))await statViewer.step(0);
    else if(proof.hasAttribute('data-native-stat-prev'))await statViewer.step(-1);

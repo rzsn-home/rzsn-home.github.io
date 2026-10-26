@@ -3,7 +3,7 @@
  * enrichment: original member-safe guide graphics · nav: N9 edge header + mobile bottom tabs · footer: Ft2
  * contrast: pass · mobile: pass 320/375/414/768 · slop: pass
  */
-@import url('./tokens.css?v=2026-10-26.4');
+@import url('./tokens.css?v=2026-10-26.5');
 *{box-sizing:border-box}
 html,body{overflow-x:clip}
 html{scroll-padding-block:1rem 6rem}
@@ -1419,6 +1419,7 @@ html[data-officer-mode='true'] .native-dashboard-heading{margin-top:.1rem}
  padding:1rem;border:2px solid #c39958;border-bottom:4px solid #9a6e31;border-radius:8px;
  background:#f3eeeb;color:#273147;box-shadow:0 12px 32px rgba(0,0,0,.45)}
 .native-admin .native-vs-evidence-panel h3,.native-admin .native-vs-evidence-panel p{color:#26324b}
+.native-admin .native-vs-evidence-panel .native-evidence-note{color:var(--color-ink)}
 .native-admin .native-vs-evidence-panel .native-muted{color:#53596c}
 .native-admin .native-vs-evidence-panel .native-row{flex-wrap:wrap}
 .native-admin #native-vs-evidence-image img{width:100%;max-height:65dvh;object-fit:contain;

@@ -72,7 +72,25 @@ export function snapshotPayload(form,keyFactory=()=>idempotency(globalThis.crypt
  const official=form.elements.official_snapshot.checked,payload={idempotency_key:keyFactory(),cycle_label:text(form.elements.cycle_label.value),league_round:integer(form.elements.league_round.value),captured_at:iso(form.elements.captured_at.value),reason:text(form.elements.reason.value),expected_rank_count:integer(form.elements.expected_rank_count.value),official_snapshot:official,official_outcome:official?(text(form.elements.official_outcome.value)||'unknown'):null,evidence_ids:JSON.parse(form.elements.evidence_ids.value||'[]'),rows};
  const proposal=text(form.elements.proposal_id.value);if(proposal)payload.proposal_id=proposal;return payload;
 }
-function applyMatchProposal(form,item){const proposal=item.proposal||{};fill(form,'proposal_id',item.id);fill(form,'evidence_ids',JSON.stringify(item.evidence_ids));fill(form,'iso_week',item.scope_key);fill(form,'opponent_tag',proposal.opponent?.tag);fill(form,'opponent_name',proposal.opponent?.name);fill(form,'server_number',proposal.opponent?.server_number);fill(form,'status',proposal.status||'live');fill(form,'official_result',proposal.official_result);fill(form,'interim_our_wins',proposal.interim_our_wins);fill(form,'interim_opponent_wins',proposal.interim_opponent_wins);for(const [index,day] of list(proposal.days).entries()){fill(form,'our_score_'+(index+1),day.our_score);fill(form,'opponent_score_'+(index+1),day.opponent_score);fill(form,'result_'+(index+1),day.result||'unknown')}}
+function resetReview(form){
+ form.reset();
+ // Hidden inputs retain programmatic values across form.reset().
+ fill(form,'proposal_id','');fill(form,'evidence_ids','[]');
+ const output=form.querySelector('[role=status]');
+ if(output){output.textContent='';output.classList.remove('native-error')}
+}
+function prepareMatchReview(form,week,data){
+ resetReview(form);fill(form,'iso_week',week);
+ const match=data.matches.find(row=>row.iso_week===week);
+ fill(form,'revision',match?.revision??0);
+ const league=data.leagues.find(row=>row.id===match?.league_id||row.cycle_label===match?.cycle_label);
+ fill(form,'cycle_label',league?.cycle_label??match?.cycle_label);
+ fill(form,'starts_week',league?.starts_week);fill(form,'ends_week',league?.ends_week);
+ fill(form,'tier',league?.tier??match?.tier??'unknown');
+ fill(form,'raw_tier_label',league?.raw_tier_label??match?.raw_tier_label);
+ fill(form,'league_round',match?.league_round);
+}
+function applyMatchProposal(form,item){const proposal=item.proposal||{};fill(form,'proposal_id',item.id);fill(form,'evidence_ids',JSON.stringify(item.evidence_ids));fill(form,'iso_week',item.scope_key);fill(form,'opponent_tag',proposal.opponent?.tag);fill(form,'opponent_name',proposal.opponent?.name);fill(form,'server_number',proposal.opponent?.server_number);fill(form,'status',proposal.status||'live');fill(form,'official_result',proposal.official_result);fill(form,'interim_our_wins',proposal.interim_our_wins);fill(form,'interim_opponent_wins',proposal.interim_opponent_wins);for(const [index,day] of list(proposal.days).entries()){const dayIndex=day.day_index??index+1;if(!Number.isInteger(dayIndex)||dayIndex<1||dayIndex>6)continue;fill(form,'our_score_'+dayIndex,day.our_score);fill(form,'opponent_score_'+dayIndex,day.opponent_score);fill(form,'result_'+dayIndex,day.result||'unknown')}}
 function applySnapshotProposal(form,item,copy){const proposal=item.proposal||{};fill(form,'proposal_id',item.id);fill(form,'evidence_ids',JSON.stringify(item.evidence_ids));fill(form,'cycle_label',proposal.cycle_label||item.scope_key);const container=form.querySelector('[data-native-dl-rank-rows]');container.innerHTML=list(proposal.rows).map(row=>rankRow(copy,row)).join('')||rankRow(copy)}
 export function createDuelLeagueController({root,api,language='de',cryptoRef=globalThis.crypto}={}){
  if(!root||!api)throw new TypeError('Duel & League root and API are required');const copy=duelCopy(language);let objectUrl='',data=normalizeDuelLeague({});
@@ -91,6 +109,7 @@ export function createDuelLeagueController({root,api,language='de',cryptoRef=glo
    const form=root.querySelector(duel?'.native-dl-match-form':'.native-dl-snapshot-form');
    if(!form)return;
    if(duel){
+    prepareMatchReview(form,item.scope_key,data);
     fill(form,'iso_week',item.scope_key);fill(form,'opponent_tag',proposal.opponent?.tag);
     fill(form,'opponent_name',proposal.opponent?.name);
     fill(form,'server_number',proposal.opponent?.server_number);
@@ -98,20 +117,18 @@ export function createDuelLeagueController({root,api,language='de',cryptoRef=glo
     fill(form,'interim_opponent_wins',proposal.interim_opponent_wins);
     fill(form,'status','unverified');fill(form,'official_result','');
    }else{
+    resetReview(form);
     fill(form,'cycle_label',item.scope_key);
     const instant=new Date(item.captured_at);
     if(!Number.isNaN(instant.valueOf()))fill(form,'captured_at',new Date(instant.getTime()-instant.getTimezoneOffset()*60000).toISOString().slice(0,16));
     const rows=list(proposal.rows);
-    if(rows.length){
-     fill(form,'expected_rank_count',Math.max(...rows.map(row=>row.rank_number)));
-     form.querySelector('[data-native-dl-rank-rows]').innerHTML=rows.map(row=>rankRow(copy,row)).join('');
-    }
+    form.querySelector('[data-native-dl-rank-rows]').innerHTML=rows.map(row=>rankRow(copy,row)).join('')||rankRow(copy);
     form.elements.official_snapshot.checked=false;
    }
    form.closest('details').open=true;form.scrollIntoView?.({block:'start'});
    return;
   }
-  const review=event.target.closest?.('[data-native-dl-review-proposal]');if(review){const item=data.proposals.find(proposal=>proposal.id===review.dataset.nativeDlReviewProposal);if(!item)return;const selector=item.proposal_kind==='match_week'?'.native-dl-match-form':'.native-dl-snapshot-form',form=root.querySelector(selector);if(item.proposal_kind==='match_week')applyMatchProposal(form,item);else applySnapshotProposal(form,item,copy);form.closest('details').open=true;form.scrollIntoView?.({block:'start'});return}
+  const review=event.target.closest?.('[data-native-dl-review-proposal]');if(review){const item=data.proposals.find(proposal=>proposal.id===review.dataset.nativeDlReviewProposal);if(!item)return;const selector=item.proposal_kind==='match_week'?'.native-dl-match-form':'.native-dl-snapshot-form',form=root.querySelector(selector);if(item.proposal_kind==='match_week'){prepareMatchReview(form,item.scope_key,data);applyMatchProposal(form,item)}else{resetReview(form);applySnapshotProposal(form,item,copy)}form.closest('details').open=true;form.scrollIntoView?.({block:'start'});return}
    const evidence=event.target.closest?.('[data-native-dl-evidence]');if(evidence){const area=root.querySelector('.native-dl-evidence');status(area,copy.loading);try{const blob=await api.loadEvidence(evidence.dataset.nativeDlEvidence);if(objectUrl)URL.revokeObjectURL(objectUrl);objectUrl=URL.createObjectURL(blob);area.innerHTML='<div class="native-fold"><button type="button" data-native-dl-evidence-close>'+esc(copy.closeEvidence)+'</button><img src="'+esc(objectUrl)+'" alt="'+esc(copy.evidence)+'"></div>'}catch(error){status(area,errorMessage(error,copy.readError),true)}return}
   if(event.target.closest?.('[data-native-dl-evidence-close]')){if(objectUrl)URL.revokeObjectURL(objectUrl);objectUrl='';root.querySelector('.native-dl-evidence').innerHTML=''}
  });
