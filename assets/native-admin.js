@@ -15,6 +15,16 @@ const apiBase=ALLIANCE_CONFIG.commandCenterEmbedUrl.replace('/?embed=1','');
 const e=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;','\'':'&#39;'}[c]));
 let sessionToken='',officer=null,panel='overview',cache={},pageLimit=20,historyLimit=20,activityLimit=30,registryFilter='all',activityCategory='all',activityGroupBy='type';
 let sessionGeneration=0;
+const officerReads=new Map();
+let d1BlockedUntil=0;
+const reusableRead=/^\/api\/(overview|officer-alerts|operations|train-manager|train-dice|members|vs-intelligence|donations-intelligence)(\?|$)/;
+function invalidateOfficerReads(){officerReads.clear()}
+function d1LimitError(){return Object.assign(Error('Das tägliche Datenbank-Leselimit ist erreicht. Neue Daten sind nach dem nächsten Reset um 00:00 UTC verfügbar.'),{status:503,code:'D1_READ_LIMIT'})}
+function noteD1Limit(result){
+ if(result?.code!=='D1_READ_LIMIT'&&!/D1.*(?:daily.*(?:row read|rows read)|operation limit.*5000000)|daily row read limit/i.test(result?.error||''))return false;
+ const now=Date.now();d1BlockedUntil=Date.UTC(new Date(now).getUTCFullYear(),new Date(now).getUTCMonth(),new Date(now).getUTCDate()+1);
+ invalidateOfficerReads();return true;
+}
 let duelLeagueController=null;
 let trainHistoryFilters={member:'',date:''},trainHistoryExpanded=false;
 let navigationTrail=[],navigationGroup=null,profileReturn=null,memberFilter='all',vsDialogRelease=null;
@@ -37,26 +47,42 @@ function restoreView(mount,entry){
  memberFilter=entry.memberFilter;
  mount.replaceChildren(entry.node);localizeOfficerTree(mount);returnFocus(mount,entry);
 }
-export function clearOfficer(){sessionGeneration++;statViewer.close();clearReviewImages();duelLeagueController?.destroy();duelLeagueController=null;sessionToken='';officer=null;cache={};panel='overview';navigationTrail=[];navigationGroup=null;profileReturn=null;memberFilter='all';pageLimit=20;historyLimit=20;trainHistoryFilters={member:'',date:''};trainHistoryExpanded=false;activityLimit=30;registryFilter='all';activityCategory='all';activityGroupBy='type';}
+export function clearOfficer(){sessionGeneration++;invalidateOfficerReads();statViewer.close();clearReviewImages();duelLeagueController?.destroy();duelLeagueController=null;sessionToken='';officer=null;cache={};panel='overview';navigationTrail=[];navigationGroup=null;profileReturn=null;memberFilter='all';pageLimit=20;historyLimit=20;trainHistoryFilters={member:'',date:''};trainHistoryExpanded=false;activityLimit=30;registryFilter='all';activityCategory='all';activityGroupBy='type';}
 export const hasOfficer=()=>Boolean(sessionToken);
 const canManageSite=()=>officer?.role==='R5'||(officer?.role==='R4'&&officer?.siteOwner===true);
 async function request(path,options={}){
+ if(Date.now()<d1BlockedUntil)throw d1LimitError();
+ const method=options.method||'GET',reusable=method==='GET'&&reusableRead.test(path);
+ if(method!=='GET')invalidateOfficerReads();
+ const previous=officerReads.get(path);
+ if(reusable&&previous&&previous.until>Date.now())return structuredClone(await previous.promise);
+ const entry={until:Date.now()+60000};
+ const run=async()=>{
  const generation=sessionGeneration;
  const headers={'Accept':'application/json',...(options.body?{'Content-Type':'application/json'}:{}),...(sessionToken?{'Authorization':'Bearer '+sessionToken}:{})};
- const response=await fetch(apiBase+path,{method:options.method||'GET',headers,body:options.body?JSON.stringify(options.body):undefined,mode:'cors',credentials:'omit',cache:'no-store'});
+ const response=await fetch(apiBase+path,{method,headers,body:options.body?JSON.stringify(options.body):undefined,mode:'cors',credentials:'omit',cache:'no-store'});
  let result;try{result=await response.json()}catch{throw Error('Die Cloudflare-API antwortet nicht korrekt.')}
- if(!response.ok){if(response.status===401&&path!=='/api/native-login'&&generation===sessionGeneration)clearOfficer();throw Object.assign(Error(result.error||'HTTP '+response.status),{status:response.status})}
+ if(!response.ok){if(noteD1Limit(result))throw d1LimitError();if(response.status===401&&path!=='/api/native-login'&&generation===sessionGeneration)clearOfficer();throw Object.assign(Error(result.error||'HTTP '+response.status),{status:response.status})}
+ if(method!=='GET')invalidateOfficerReads();
  return result;
+ };
+ if(!reusable)return run();
+ entry.promise=run();officerReads.set(path,entry);
+ try{return structuredClone(await entry.promise)}catch(error){if(officerReads.get(path)===entry)officerReads.delete(path);throw error}
 }
 async function binaryRequest(path,{method='GET',body,headers={}}={}){
+ if(Date.now()<d1BlockedUntil)throw d1LimitError();
+ if(method!=='GET')invalidateOfficerReads();
  const generation=sessionGeneration;
  const response=await fetch(apiBase+path,{method,headers:{'Accept':method==='GET'?'image/*':'application/json',...(sessionToken?{'Authorization':'Bearer '+sessionToken}:{}),...headers},body,mode:'cors',credentials:'omit',cache:'no-store'});
  if(!response.ok){
   let message='HTTP '+response.status;
-  try{const result=await response.clone().json();message=result.error||message}catch{}
+  let result;try{result=await response.clone().json();message=result.error||message}catch{}
+  if(noteD1Limit(result))throw d1LimitError();
   if(response.status===401&&generation===sessionGeneration)clearOfficer();
   throw Object.assign(Error(message),{status:response.status});
  }
+ if(method!=='GET')invalidateOfficerReads();
  return method==='GET'?response.blob():response.json();
 }
 const statViewer=createStatEvidenceViewer({request,getToken:()=>sessionToken,apiBase});
@@ -148,7 +174,7 @@ async function view(mount){
  const header='<div class="native-officer-strip" role="group" aria-label="Offiziersbereich">'+
   '<a class="native-return-link" href="#today">← Zur Website</a>'+
   '<div class="native-officer-controls"><span class="native-officer-badge">'+e(officer?.role||'Offizier')+' · '+e(officer?.name||'')+(officer?.siteOwner?' · Website-Eigentümerin':'')+
-  '</span><details class="native-account-menu"><summary>Mein Zugang</summary><div><button type="button" data-officer-tab="access">Offizierszugänge</button><button type="button" data-officer-logout>Abmelden</button></div></details></div></div>';
+  '</span><details class="native-account-menu"><summary>Mein Zugang</summary><div><button type="button" data-native-refresh>Aktualisieren</button><button type="button" data-officer-tab="access">Offizierszugänge</button><button type="button" data-officer-logout>Abmelden</button></div></details></div></div>';
  mount.innerHTML='<section class="native-admin"><h1 class="sr-only">RZSN Command Center</h1>'+header+nav(mount.ownerDocument)+
   (navigationTrail.length?'<div class="native-hub-return"><button type="button" data-native-nav-back '+(navigationTrail.at(-1).panel==='more'?'data-officer-tab="more"':'')+'>← <span>Zurück</span></button><span>'+e(secondaryPanels.find(([key])=>key===panel)?.[1]||'Verwaltung')+'</span></div>':'')+
   '<div class="native-admin-content" id="native-admin-content"><p>Daten werden geladen …</p></div></section>';
@@ -319,7 +345,7 @@ async function view(mount){
    const [data,summary]=await Promise.all([request('/api/vs-intelligence'),request('/api/overview')]);
    cache.vs=data;cache.overview=summary;
    target.innerHTML='<div class="native-vs-week-toolbar"><label>'+(officerLanguage(target.ownerDocument)==='de'?'Woche':'Week')+
-    ' <select id="native-vs-week">'+data.weeks.map(w=>'<option value="'+e(w.week)+'">'+e(w.week)+'</option>').join('')+'</select></label><input type="search" id="native-vs-search" aria-label="Spieler suchen" placeholder="Spieler suchen" autocomplete="off"></div>'+
+    ' <select id="native-vs-week">'+data.weeks.map(w=>'<option value="'+e(w.week)+'" '+(w.week===cache.vsView?.week?'selected':'')+'>'+e(w.week)+'</option>').join('')+'</select></label><input type="search" id="native-vs-search" aria-label="Spieler suchen" placeholder="Spieler suchen" autocomplete="off"></div>'+
     '<div id="native-vs-body"></div>';renderVs(target);
   }else if(panel==='duelLeague'){
    target.innerHTML='<div id="native-duel-league-root"></div>';
@@ -789,8 +815,10 @@ function renderVs(target){
  if(!host)return;
  if(!week){host.innerHTML='<p class="native-muted">Noch keine VS-Woche importiert.</p>';return}
  const policy=cache.vs.policy||{};
+ if(cache.vsView?.week!==week.week)cache.vsView={week:week.week,day:-1,category:'all',sort:cache.vsView?.sort||'priority',query:target.querySelector('#native-vs-search')?.value||'',limits:{},openGroups:[]};
+ target.querySelector('#native-vs-search').value=cache.vsView.query||'';
  const enUi=officerLanguage(target.ownerDocument)!=='de';
- const layout=renderVsOverview(week,policy,{esc:e,numberText,formatTime:formatOfficerTime,language:officerLanguage(target.ownerDocument)});
+ const layout=renderVsOverview(week,policy,{esc:e,numberText,formatTime:formatOfficerTime,language:officerLanguage(target.ownerDocument),view:cache.vsView});
  const lowWarnings=(week.members||[]).filter(x=>x.repeatedLowDays).length;
  const participationWarnings=(week.members||[]).filter(x=>x.participationStatus==='below').length;
  const reviewCount=cache.overview?.reviews;
@@ -817,26 +845,23 @@ function renderVs(target){
   '</div>'+
   (notices.length?'<div class="native-vs-single-insight"><b>'+ (enUi?'Note':'Hinweis')+'</b>'+
     '<span>'+notices.map(e).join(' · ')+'</span>'+reportContext(week,officerLanguage(target.ownerDocument))+'</div>':'')+
-  layout.dayTiles+layout.groupsHtml+'<p data-native-vs-search-empty role="status" hidden>Keine Spieler gefunden.</p>'+
+  layout.dayTiles+layout.groupsHtml+
   '<details class="native-fold native-vs-explainer"><summary>'+ (enUi?'How are results assessed?':'Wie werden die Werte bewertet?')+'</summary>'+
    '<p class="native-fold-body native-muted">'+(enUi?'Weekly totals are calculated from six confirmed daily scores. Missing or unclear values are never zero; partial sums remain marked as incomplete.':'Die Wochensumme wird aus sechs bestätigten Tageswerten berechnet. Fehlende oder unklare Tage sind nie automatisch 0; Teilstände bleiben als unvollständig gekennzeichnet.')+'</p></details>'+
   '</section>';
- filterVsMembers(target);
 }
 function filterVsMembers(target){
- const query=String(target.querySelector('#native-vs-search')?.value||'').normalize('NFKC').trim().toLocaleLowerCase();
- let matches=0;
- for(const group of target.querySelectorAll('.native-vs-group')){
-  let count=0;
-  for(const row of group.querySelectorAll('.native-vs-player')){
-   row.hidden=!String(row.querySelector('.native-vs-person-main strong')?.textContent||'').normalize('NFKC').toLocaleLowerCase().includes(query);
-   if(!row.hidden)count++;
-  }
-  group.hidden=count===0;matches+=count;
-  if(query){if(!Object.hasOwn(group.dataset,'searchOpen'))group.dataset.searchOpen=String(group.open);group.open=true;}
-  else if(Object.hasOwn(group.dataset,'searchOpen')){group.open=group.dataset.searchOpen==='true';delete group.dataset.searchOpen;}
- }
- const empty=target.querySelector('[data-native-vs-search-empty]');if(empty)empty.hidden=!query||matches>0;
+ if(!cache.vsView)return;
+ if(!cache.vsView.query)cache.vsView.openGroups=[...target.querySelectorAll('[data-native-vs-group][open]')].map(node=>node.dataset.nativeVsGroup);
+ cache.vsView.query=target.querySelector('#native-vs-search')?.value||'';cache.vsView.limits={};renderVsResults(target);
+}
+function renderVsResults(target,focusSelector=''){
+ const state=cache.vsView,week=cache.vs?.weeks?.find(row=>row.week===state?.week),host=target.querySelector('#native-vs-results');
+ if(!week||!host)return;
+ host.outerHTML=renderVsOverview(week,cache.vs.policy||{},{esc:e,numberText,formatTime:formatOfficerTime,language:officerLanguage(target.ownerDocument),view:state}).groupsHtml;
+ target.querySelectorAll('[data-native-vs-day]').forEach(button=>button.setAttribute('aria-pressed',String(Number(button.dataset.nativeVsDay)===state.day)));
+ localizeOfficerTree(target.querySelector('#native-vs-results'));
+ if(focusSelector)target.querySelector(focusSelector)?.focus({preventScroll:true});
 }
 const trainWeekdays=['Montag','Dienstag','Mittwoch','Donnerstag','Freitag','Samstag','Sonntag'];
 const trainRideTypes=['R5','R4','Members Day','Donation King','VS Hero'];
@@ -1909,6 +1934,20 @@ export function initNativeAdmin(mount){
  mount.lang=officerLanguage(mount.ownerDocument);
  mount.dir=mount.lang==='ar'?'rtl':'ltr';
  mount.addEventListener('click',async event=>{
+  const vsControl=event.target.closest?.('[data-native-vs-day],[data-native-vs-category],[data-native-vs-weekly],[data-native-vs-more-group]');
+  if(vsControl&&cache.vsView){
+   const target=mount.querySelector('#native-admin-content'),state=cache.vsView;
+   const openGroups=[...target.querySelectorAll('[data-native-vs-group][open]')].map(node=>node.dataset.nativeVsGroup);
+   if(vsControl.hasAttribute('data-native-vs-more-group')){
+    const kind=vsControl.dataset.nativeVsMoreGroup;state.limits[kind]=(state.limits[kind]||10)+10;state.openGroups=openGroups;
+    renderVsResults(target);
+    (target.querySelector('[data-native-vs-more-group="'+kind+'"]')||target.querySelector('[data-native-vs-group="'+kind+'"] > summary'))?.focus({preventScroll:true});return;
+   }
+   state.limits={};
+   if(vsControl.hasAttribute('data-native-vs-category')){state.category=vsControl.dataset.nativeVsCategory;state.openGroups=state.category==='all'?['low']:[state.category];renderVsResults(target,'[data-native-vs-category="'+state.category+'"]');return;}
+   state.day=vsControl.hasAttribute('data-native-vs-day')?Number(vsControl.dataset.nativeVsDay):-1;state.category='all';state.query='';state.openGroups=state.day>=0?['low']:[];
+   target.querySelector('#native-vs-search').value='';renderVsResults(target,'#native-vs-results-title');target.querySelector('#native-vs-results-title')?.scrollIntoView?.({block:'nearest'});return;
+  }
   if(event.target.closest?.('[data-native-nav-back]')){
    const entry=navigationTrail.pop();if(entry)restoreView(mount,entry);return;
   }
@@ -1979,7 +2018,7 @@ export function initNativeAdmin(mount){
    if(action==='member-find')destination.querySelector('#native-member-search')?.focus();
    return;
   }
-  if(button.hasAttribute('data-native-refresh')){await view(mount);return}
+  if(button.hasAttribute('data-native-refresh')){invalidateOfficerReads();await view(mount);return}
   if(button.dataset.nativeTaskToggle){
    const row=(cache.ops?.tasks||[]).find(x=>x.id===button.dataset.nativeTaskToggle);
    if(!row)return;
@@ -2228,6 +2267,10 @@ export function initNativeAdmin(mount){
   }
  });
  mount.addEventListener('change',event=>{
+  if(event.target.id==='native-vs-sort'&&cache.vsView){
+   const target=mount.querySelector('#native-admin-content');cache.vsView.sort=event.target.value;cache.vsView.limits={};
+   cache.vsView.openGroups=[...target.querySelectorAll('[data-native-vs-group][open]')].map(node=>node.dataset.nativeVsGroup);renderVsResults(target,'#native-vs-sort');return;
+  }
   if(event.target.id==='native-member-filter'){
    memberFilter=['all','active','former'].includes(event.target.value)?event.target.value:'all';
    const target=mount.querySelector('#native-admin-content');renderMembers(target,target.querySelector('#native-member-search')?.value||'');return;
@@ -2278,7 +2321,7 @@ export function initNativeAdmin(mount){
    form.querySelector('#native-login-status').textContent='Anmeldung wird geprüft …';
    try{
     const login=await request('/api/native-login',{method:'POST',body:{code:form.elements.namedItem('code').value}});
-    sessionGeneration++;sessionToken=login.token;officer=login;form.elements.namedItem('code').value='';await view(mount);
+    sessionGeneration++;invalidateOfficerReads();sessionToken=login.token;officer=login;form.elements.namedItem('code').value='';await view(mount);
    }catch(err){form.querySelector('#native-login-status').textContent=err.message;button.disabled=false}
    return;
   }

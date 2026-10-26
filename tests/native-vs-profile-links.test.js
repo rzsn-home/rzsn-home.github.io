@@ -84,7 +84,7 @@ test('VS priority is NOT OCR review count; VS player opens real dossier, history
  assert.match(q('[data-native-action=review-open]').textContent,/OCR 0/);
  assert.doesNotMatch(q('[data-native-action=review-open]').textContent,/29/);
  const search=q('#native-vs-search');search.value='missing-name';search.dispatchEvent(new dom.window.Event('input',{bubbles:true}));
- assert.equal(q('.native-vs-player').hidden,true);
+ assert.equal(q('.native-vs-player'),null,'nonmatching players are excluded before compact pagination');
  assert.equal(q('[data-native-vs-search-empty]').hidden,false);
  search.value='Synthetic';search.dispatchEvent(new dom.window.Event('input',{bubbles:true}));
  assert.equal(q('.native-vs-player').hidden,false);

@@ -1,5 +1,19 @@
 # Commander-Admin: Bedienung und Browser-Prüfung am 26.10.2026
 
+## Tagesvergleich, Ergebnislisten und D1-Leseschutz: 2026-10-26.7
+
+Die sechs Tageskacheln öffnen die Spielergebnisse des ausgewählten Tages in derselben Woche. Die Kategorien Ziel erreicht, Unter Ziel, Unbekannt und Vor Beitritt zeigen ihre zugehörigen Spieler und bestätigten Tagespunkte. Fehlende oder ungeprüfte Werte werden nicht als Null ausgegeben. Spielerakten und vorhandene Tagesbelege bleiben erreichbar; beim Zurückkehren bleiben Tag, Suche, Sortierung und aufgeklappte Bereiche erhalten.
+
+Ergebnisgruppen zeigen zunächst zehn Spieler, weitere werden in Zehnerschritten eingeblendet. Sortierbar nach Tagen unter Ziel, Punkten auf-/absteigend, Namen und Allianzrang. Unvollständige Wochensummen bleiben beim Punktesortieren hinten. Die Suche berücksichtigt alle geladenen Spieler vor der Begrenzung. Tagesfilter, Sortierung, Suche und Nachladen benötigen keine zusätzlichen API- oder D1-Abfragen.
+
+Nach der gemeldeten D1-Tagesgrenze werden wiederholte Übersichtsabfragen im Browser höchstens 60 Sekunden im Arbeitsspeicher wiederverwendet und gleichzeitige identische Abfragen zusammengefasst. Aktualisieren im Kontomenü lädt neu; Schreibaktionen, An-/Abmelden verwerfen den Zwischenspeicher. Das Mitgliederregister mit seinen bearbeitbaren Revisionen bleibt frisch. Eine ausdrücklich erkannte Lesesperre stoppt weitere API-Versuche dieser Seite bis 00:00 UTC und zeigt eine verständliche, übersetzte Meldung.
+
+Der zugehörige bestehende Backend-Worker ergänzt maximal 30 Sekunden privaten Speicher für ausgewählte allgemeine Lesedaten. Die Anmeldung wird weiterhin vor jedem Zugriff geprüft; widerrufene Sitzungen erreichen auch warme Daten nicht. Schreibversuche verwerfen die gespeicherten Lesedaten. Ein erkannter D1-Read-Limit-Fehler sperrt weitere Datenbankzugriffe derselben Worker-Instanz bis zum UTC-Tageswechsel. Auch Wartungsaufrufe respektieren diese Sperre. Es gibt keine öffentliche HTTP-Zwischenspeicherung, Migration, Datenänderung oder Tarifumstellung.
+
+Die Live- und Staging-Worker sind an dieselbe vorhandene D1-Datenbank gebunden. Die Maßnahmen reduzieren unnötige Zugriffe; sie garantieren keine kontoweite Verbrauchsgrenze gegen andere Clients, Importe oder weitere Datenbanken. Der Tagesverbrauch des gesamten Cloudflare-Kontos muss nach dem Reset beobachtet werden. Die bestehende Tagessperre wird durch eine Veröffentlichung nicht aufgehoben. Produktive Datenbankabfragen und erneute D1-Exporte wurden während dieser Fehlerbearbeitung ausgesetzt.
+
+Prüfstand .7: 285 Frontend- und 280 Backend-Tests bestanden, ohne Fehler oder Skips; Syntax-/Sprachvalidierung bestanden, beide npm-Audits ohne Schwachstellen und Worker-Dry-Run bestanden. Gezielte Regressionen für Tageszuordnung, echte Nullwerte, unbekannte Werte, Beitritt, Sortierreihenfolge, Suche jenseits der ersten zehn Spieler, Nachladen, Fokus und Profilrückweg; D1-Regressionen für Ablauf, gleichzeitige Abfragen, getrennte Datenbanken, Invalidierung, Sitzungssperre und UTC-Reset. Lokaler Chrome mit synthetischer R4-/R5-Sitzung: zwei Bedienabläufe und 16 Kombinationen aus Bildschirmbreite und Darstellung bestanden. Reale R4-/R5-Konten und ein echtes iPhone/Safari bleiben wie unten dokumentiert offen.
+
 ## Umsetzung der nächsten fünf Prioritäten: 2026-10-26.6
 
 Die folgende Umsetzung ergänzt den darunter dokumentierten Ausgangsstand von Version .5:

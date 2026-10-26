@@ -1,9 +1,42 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {renderVsOverview,vsDataFreshness,derivedVsWeekTotal} from '../assets/native-vs-overview.js';
+import {renderVsOverview,vsDataFreshness,derivedVsWeekTotal,vsDayState,vsResultGroups} from '../assets/native-vs-overview.js';
 
 const esc=x=>String(x).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const fmt=x=>String(x);
+
+test('day drill-down separates verified zero, missing data and pre-join days without changing the source',()=>{
+ const people=[
+  {id:'zero',name:'Zero',days:[{weekday:0,points:0,verified:true}]},
+  {id:'met',name:'Met',days:[{weekday:0,points:4000000,quality:'observed'}]},
+  {id:'missing',name:'Unknown',days:[]},
+  {id:'joined',name:'Joined',days:[{weekday:0,quality:'before_join',points:null,verified:false}]},
+  {id:'unverified',name:'Unchecked',days:[{weekday:0,points:9000000,verified:false}]}
+ ];
+ const week={threshold:3600000,members:people},original=JSON.stringify(week);
+ const view=vsResultGroups(week,{day:0});
+ assert.deepEqual(view.counts,{low:1,unknown:2,joined:1,met:1});
+ assert.equal(vsDayState(people[0],0,3600000).points,0);
+ assert.equal(vsDayState(people[2],0,3600000).points,null);
+ assert.equal(vsResultGroups(week,{day:0,category:'met'}).groups[0].members[0].id,'met');
+ assert.equal(JSON.stringify(week),original);
+ assert.equal(vsDayState({days:[...people[0].days,...people[0].days]},0,3600000).kind,'unknown');
+});
+
+test('result sorting searches all players, keeps incomplete totals last and paginates compact groups',()=>{
+ const members=Array.from({length:25},(_,i)=>({id:'m'+i,name:'Player '+i,failed:1,unknown:0,
+  days:Array.from({length:6},(_,weekday)=>({weekday,points:i*100,verified:true}))}));
+ members.push({id:'partial',name:'Incomplete',failed:1,unknown:1,days:[{weekday:0,points:999999,verified:true}]});
+ const week={week:'2026-W43',members,dayTotals:[]};
+ const high=vsResultGroups(week,{sort:'points_desc'}).groups[0].members;
+ assert.equal(high[0].id,'m24');assert.equal(high.at(-1).id,'partial');
+ const low=vsResultGroups(week,{sort:'points_asc'}).groups[0].members;
+ assert.equal(low[0].id,'m0');assert.equal(low.at(-1).id,'partial');
+ assert.equal(vsResultGroups(week,{query:'Player 24'}).matchingCount,1);
+ const html=renderVsOverview(week,{}, {esc,numberText:String,formatTime:fmt}).groupsHtml;
+ assert.equal((html.match(/class="native-vs-player /g)||[]).length,10);
+ assert.match(html,/data-native-vs-more-group="low"/);
+});
 test('VS cockpit shows actual source time, six immediately visible day tiles and compact proof status',()=>{
  const member={id:'player-1',name:'Real Player',rank:'R2',
   failed:3,unknown:0,activeDays:6,weekly_points:11403546,weekly_proof_available:false,
