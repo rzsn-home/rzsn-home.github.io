@@ -87,9 +87,17 @@ test('Officer can log Zombie Siege and Marshal Guard recurring runs, preserve De
  assert.equal(mount.querySelectorAll('.native-event-panel').length,2);
  assert.match(q('.native-event-panels').textContent,/Level unverändert|\+1 Level/);
  assert.match(q('#native-records').textContent,/Desert Storm \(1\)/);
- assert.match(q('#native-records').textContent,/Zombie-Festungen gefunden \(1\)/);
- assert.match(q('#native-records').textContent,/Festungslevel/);
- assert.match(q('#native-records').textContent,/kein Zombie-Siege-Ergebnis/);
+ const siegePanel=q('.native-event-panel[aria-label^="Zombie Siege"]');
+ const marshallPanel=q('.native-event-panel[aria-label^="Marshall Guard"]');
+ assert.ok(siegePanel,'Zombie Siege panel must exist');
+ assert.ok(marshallPanel,'Marshall Guard panel must exist');
+ assert.match(siegePanel.textContent,/Zombie-Festungen gefunden \(1\)/);
+ assert.match(siegePanel.textContent,/Festungslevel/);
+ assert.match(siegePanel.textContent,/kein Zombie-Siege-Ergebnis/);
+ assert.match(siegePanel.textContent,/Synthetic Officer/);
+ assert.doesNotMatch(marshallPanel.textContent,/Zombie-Festungen gefunden/);
+ assert.equal(q('#native-records').querySelectorAll(':scope > details.native-fold').length,1,
+  'Only unrelated Desert Storm remains outside the two event panels');
  assert.match(q('#native-records').textContent,/54|51|19|18/);
  q('[data-native-event-quick=zombie_siege]').click();
  let form=q('#native-record-save');

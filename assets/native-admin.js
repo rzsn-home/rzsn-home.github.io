@@ -1040,6 +1040,16 @@ function renderEventRuns(target){
   '<span><strong>'+e(x.level??'—')+'</strong><small>Level</small></span>'+
   (x.event_type==='zombie_siege'?'<span><strong>'+e(x.waves??'—')+'</strong><small>Wellen</small></span>':'')+
    '<span class="native-event-history-actor">'+e(names.get(x.lead_id)||'Leitung offen')+'<small>'+e(reservedAutomaticStart(x)?t('Reserviert von Spieler','Reserved by player')+' · '+attendanceLabel(x):verifiedProtocolStart(x)?'Startender Spieler · '+attendanceLabel(x):attendanceLabel(x))+'</small></span></button>';
+ const fortress=(data?.fortressFinds||[]).map(x=>{
+  let details={};try{details=JSON.parse(x.settings_json||'{}')}catch{}
+  if(!Number.isInteger(details.level)||!details.member_id)return '';
+  const starter=names.get(details.member_id)||details.source_name||t('Spieler nicht zugeordnet','Unlinked player');
+  return '<article class="native-event-history-row"><span><b>'+e(x.begins_at||'—')+'</b><small>'+t('Serverzeit · Gefunden, kein Zombie-Siege-Ergebnis','Server time · Found, not a Zombie Siege result')+'</small></span>'+
+   '<span><strong>'+e(details.level)+'</strong><small>'+t('Festungslevel','Fortress level')+'</small></span>'+
+   '<span class="native-event-history-actor"><strong>'+e(starter)+'</strong><small>'+t('Entdecker · Logbeleg','Discoverer · log evidence')+'</small></span></article>';
+ }).filter(Boolean);
+ const fortressHistory='<details class="native-fold"><summary>'+t('Zombie-Festungen gefunden','Zombie fortresses found')+' ('+fortress.length+')</summary><div class="native-fold-body native-event-history">'+
+  (fortress.length?fortress.join(''):'<p class="native-muted">'+t('Keine belegten Festungsfunde gespeichert.','No confirmed fortress discoveries recorded.')+'</p>')+'</div></details>';
  const groups=['zombie_siege','marshall_guard'].map(type=>{
   const data=summarizeAllianceEventRuns(entries,type);
   const last=data.latest,latestLevel=data.level??'—';
@@ -1070,21 +1080,12 @@ function renderEventRuns(target){
    (data.started.length?'<p class="native-muted">'+data.started.length+' '+t('protokollierte oder automatisch ausgelöste Starts · Level nur aus Beleg; Ergebnisse ohne Abschlusslog offen.','recorded or auto-triggered starts · Levels need evidence; no completion is assumed.')+'</p>':'')+
    '<details class="native-fold"><summary>Alle Durchgänge · '+data.entries.length+'</summary>'+
     '<div class="native-fold-body native-event-history">'+(data.entries.length?data.entries.map(eventRow).join(''):
-    '<p class="native-muted">Noch keine erfassten Durchgänge.</p>')+'</div></details></section>';
+    '<p class="native-muted">Noch keine erfassten Durchgänge.</p>')+'</div></details>'+
+   (type==='zombie_siege'?fortressHistory:'')+'</section>';
  }).join('');
  const other=entries.filter(x=>x.event_type==='desert_storm');
- const fortress=(data?.fortressFinds||[]).map(x=>{
-  let details={};try{details=JSON.parse(x.settings_json||'{}')}catch{}
-  if(!Number.isInteger(details.level)||!details.member_id)return '';
-  const starter=names.get(details.member_id)||details.source_name||t('Spieler nicht zugeordnet','Unlinked player');
-  return '<article class="native-event-history-row"><span><b>'+e(x.begins_at||'—')+'</b><small>'+t('Serverzeit · Gefunden, kein Zombie-Siege-Ergebnis','Server time · Found, not a Zombie Siege result')+'</small></span>'+
-   '<span><strong>'+e(details.level)+'</strong><small>'+t('Festungslevel','Fortress level')+'</small></span>'+
-   '<span class="native-event-history-actor"><strong>'+e(starter)+'</strong><small>'+t('Entdecker · Logbeleg','Discoverer · log evidence')+'</small></span></article>';
- }).filter(Boolean);
  target.querySelector('#native-records').innerHTML='<div class="native-event-intro"><p>Alle paar Tage erfassen: <strong>Level, Wellen, Ergebnis und Teilnahme</strong>. Jeder Durchgang bleibt mit Datum und verantwortlichem Officer erhalten.</p><p class="native-muted">'+(german?'Teilnahme ist ein manueller Offizierseintrag und wird ohne Beleg nicht automatisch ergänzt.':'Attendance is entered manually by an officer and is never inferred without evidence.')+'</p></div>'+
   '<div class="native-event-panels">'+groups+'</div>'+
-  '<details class="native-fold"><summary>'+t('Zombie-Festungen gefunden','Zombie fortresses found')+' ('+fortress.length+')</summary><div class="native-fold-body native-event-history">'+
-  (fortress.length?fortress.join(''):'<p class="native-muted">'+t('Keine belegten Festungsfunde gespeichert.','No confirmed fortress discoveries recorded.')+'</p>')+'</div></details>'+
   '<details class="native-fold"><summary>Weitere Events · Desert Storm ('+other.length+')</summary>'+
   '<div class="native-fold-body native-event-history">'+(other.length?other.map(eventRow).join(''):
    '<p class="native-muted">Noch keine Desert-Storm-Durchgänge dokumentiert.</p>')+'</div></details>';
