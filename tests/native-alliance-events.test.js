@@ -20,6 +20,7 @@ test('Alliance event history preserves unknown levels, outcomes, waves and genui
   {id:'c',event_type:'zombie_siege',event_date:'2026-10-20',level:99,waves:20,outcome:'scheduled'},
   {id:'d',event_type:'marshall_guard',event_date:'2026-10-12',level:null,outcome:'completed'},
   {id:'start-proof',event_type:'marshall_guard',event_date:'2026-10-22',level:null,outcome:'scheduled',notes:'RZSN_GAME_LOG_START_CONFIRMED; source_event_id=abc'},
+  {id:'auto-start',event_type:'marshall_guard',event_date:'2026-10-25',level:8,outcome:'scheduled',notes:'RZSN_MARSHALL_AUTO_START_RESERVATION; server_time=2026-10-25 16:00:00; result_unverified'},
   {id:'e',event_type:'zombie_siege',event_date:'invalid',level:8,outcome:'completed'}
  ];
  const siege=summarizeAllianceEventRuns(runs,'zombie_siege');
@@ -40,7 +41,8 @@ test('Alliance event history preserves unknown levels, outcomes, waves and genui
  assert.equal(guard.level,null);
  assert.equal(guard.waves,null);
  assert.equal(guard.deltaLevel,null);
- assert.equal(guard.started.length,1);
+ assert.equal(guard.started.length,2);
+ assert.equal(guard.entries.find(x=>x.id==='auto-start').level,8);
  assert.equal(guard.planned.length,0,'A confirmed start must not be displayed as a future scheduled event');
  assert.equal(guard.confirmedCount,1,'Start is not proof that the event completed');
  assert.equal(summarizeAllianceEventRuns([{event_type:'zombie_siege',event_date:'2026-10-11',level:0,waves:null,outcome:'failed'}],'zombie_siege').waves,null);
@@ -59,7 +61,8 @@ test('Officer can log Zombie Siege and Marshal Guard recurring runs, preserve De
   {id:'dddddddd-dddd-4ddd-dddd-dddddddddddd',event_type:'marshall_guard',event_date:'2026-10-12',level:5,waves:null,attendance:43,outcome:'completed'},
   {id:'eeeeeeee-eeee-4eee-eeee-eeeeeeeeeeee',event_type:'desert_storm',event_date:'2026-10-10',outcome:'completed'}
  ];
- const ops={events:existing,tasks:[],absences:[],members:[{id,name:'Synthetic Officer',rank:'R4'}]};
+ const ops={events:existing,tasks:[],absences:[],members:[{id,name:'Synthetic Officer',rank:'R4'}],
+  fortressFinds:[{id:'fortress-proof',title:'Zombie-Festung Lv. 6 gefunden',begins_at:'2026-10-24 15:00:00',status:'found',settings_json:JSON.stringify({level:6,member_id:id,source_name:'Synthetic Officer'})}]};
  globalThis.fetch=async(url,options={})=>{
   const path=new URL(url).pathname;
   if(path==='/api/native-login')return Response.json({token:'synthetic-token',name:'Officer',role:'R4'});
@@ -84,6 +87,9 @@ test('Officer can log Zombie Siege and Marshal Guard recurring runs, preserve De
  assert.equal(mount.querySelectorAll('.native-event-panel').length,2);
  assert.match(q('.native-event-panels').textContent,/Level unverändert|\+1 Level/);
  assert.match(q('#native-records').textContent,/Desert Storm \(1\)/);
+ assert.match(q('#native-records').textContent,/Zombie-Festungen gefunden \(1\)/);
+ assert.match(q('#native-records').textContent,/Festungslevel/);
+ assert.match(q('#native-records').textContent,/kein Zombie-Siege-Ergebnis/);
  assert.match(q('#native-records').textContent,/54|51|19|18/);
  q('[data-native-event-quick=zombie_siege]').click();
  let form=q('#native-record-save');

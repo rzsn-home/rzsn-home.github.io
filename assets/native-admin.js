@@ -994,6 +994,16 @@ const allianceEventLabels={
  desert_storm:'Desert Storm'
 };
 const verifiedProtocolStart=x=>String(x?.notes||'').startsWith('RZSN_GAME_LOG_START_CONFIRMED;');
+const reservedAutomaticStart=x=>{
+ const notes=String(x?.notes||'');
+ if(!notes.startsWith('RZSN_MARSHALL_AUTO_START_RESERVATION;'))return false;
+ const match=notes.match(/server_time=(20\d\d-\d\d-\d\d \d\d:\d\d:\d\d)/);
+ if(!match)return false;
+ // Last War server clock is UTC-02:00: 16:00 game time = 18:00 UTC.
+ const eventUtc=Date.parse(match[1].replace(' ','T')+'Z')+2*3600000;
+ return Number.isFinite(eventUtc)&&eventUtc<=Date.now();
+};
+const logStart=x=>verifiedProtocolStart(x)||reservedAutomaticStart(x);
 const allianceEventOutcomeLabels={
  scheduled:'Geplant',completed:'Abgeschlossen',failed:'Nicht geschafft',cancelled:'Abgesagt'
 };
@@ -1006,8 +1016,8 @@ export function summarizeAllianceEventRuns(source,type){
     String(b.updated_at||'').localeCompare(String(a.updated_at||'')));
  const historical=entries.filter(x=>x.outcome==='completed'||x.outcome==='failed');
  const completed=entries.filter(x=>x.outcome==='completed');
- const planned=entries.filter(x=>x.outcome==='scheduled'&&!verifiedProtocolStart(x));
- const started=entries.filter(verifiedProtocolStart);
+ const planned=entries.filter(x=>x.outcome==='scheduled'&&!logStart(x));
+ const started=entries.filter(logStart);
  const latest=historical[0]||null,previous=historical[1]||null;
  const number=x=>Number.isInteger(x)&&x>=1&&x<=999?x:null;
  const level=number(latest?.level),previousLevel=number(previous?.level);
@@ -1023,12 +1033,13 @@ function renderEventRuns(target){
  const data=cache.ops,entries=data?.events||[];
  const names=new Map((data?.members||[]).map(m=>[m.id,m.name]));
  const german=officerLanguage(target.ownerDocument)==='de';
+ const t=(de,en)=>german?de:en;
  const attendanceLabel=x=>Number.isInteger(x.attendance)?x.attendance+(german?' Teilnehmer · Offizierseintrag':' participants · officer entry'):(german?'Teilnahme nicht belegt':'Attendance not evidenced');
  const eventRow=x=>'<button type="button" class="native-event-history-row" data-native-edit="'+e(x.id)+'">'+
-  '<span><b>'+e(x.event_date)+'</b><small>'+e(x.outcome==='scheduled'&&verifiedProtocolStart(x)?'Start nachgewiesen · Ergebnis offen':allianceEventOutcomeLabels[x.outcome]||'Nicht bestätigt')+'</small></span>'+
+  '<span><b>'+e(x.event_date)+'</b><small>'+e(reservedAutomaticStart(x)?t('Automatischer Start laut Reservierung · Ergebnis offen','Auto-started from reservation · result unknown'):x.outcome==='scheduled'&&verifiedProtocolStart(x)?'Start nachgewiesen · Ergebnis offen':allianceEventOutcomeLabels[x.outcome]||'Nicht bestätigt')+'</small></span>'+
   '<span><strong>'+e(x.level??'—')+'</strong><small>Level</small></span>'+
   (x.event_type==='zombie_siege'?'<span><strong>'+e(x.waves??'—')+'</strong><small>Wellen</small></span>':'')+
-   '<span class="native-event-history-actor">'+e(names.get(x.lead_id)||'Leitung offen')+'<small>'+e(verifiedProtocolStart(x)?'Startender Spieler · '+attendanceLabel(x):attendanceLabel(x))+'</small></span></button>';
+   '<span class="native-event-history-actor">'+e(names.get(x.lead_id)||'Leitung offen')+'<small>'+e(reservedAutomaticStart(x)?t('Reserviert von Spieler','Reserved by player')+' · '+attendanceLabel(x):verifiedProtocolStart(x)?'Startender Spieler · '+attendanceLabel(x):attendanceLabel(x))+'</small></span></button>';
  const groups=['zombie_siege','marshall_guard'].map(type=>{
   const data=summarizeAllianceEventRuns(entries,type);
   const last=data.latest,latestLevel=data.level??'—';
@@ -1056,14 +1067,24 @@ function renderEventRuns(target){
      bars.map(x=>'<div><span class="native-event-bar '+(x.outcome==='failed'?'native-event-bar--failed':'')+'" style="height:'+Math.round(x.level/ceiling*100)+'%"></span>'+
       '<b>'+e(x.level)+'</b><small>'+e(x.event_date.slice(5))+'</small></div>').join('')+'</div>':
     '<p class="native-muted">Noch keine bestätigten Level für einen Verlauf vorhanden.</p>')+
-   (data.started.length?'<p class="native-muted">'+data.started.length+' protokollierte Starts · unbekannte Level bleiben offen; Starts allein beweisen keinen Abschluss.</p>':'')+
+   (data.started.length?'<p class="native-muted">'+data.started.length+' '+t('protokollierte oder automatisch ausgelöste Starts · Level nur aus Beleg; Ergebnisse ohne Abschlusslog offen.','recorded or auto-triggered starts · Levels need evidence; no completion is assumed.')+'</p>':'')+
    '<details class="native-fold"><summary>Alle Durchgänge · '+data.entries.length+'</summary>'+
     '<div class="native-fold-body native-event-history">'+(data.entries.length?data.entries.map(eventRow).join(''):
     '<p class="native-muted">Noch keine erfassten Durchgänge.</p>')+'</div></details></section>';
  }).join('');
  const other=entries.filter(x=>x.event_type==='desert_storm');
+ const fortress=(data?.fortressFinds||[]).map(x=>{
+  let details={};try{details=JSON.parse(x.settings_json||'{}')}catch{}
+  if(!Number.isInteger(details.level)||!details.member_id)return '';
+  const starter=names.get(details.member_id)||details.source_name||t('Spieler nicht zugeordnet','Unlinked player');
+  return '<article class="native-event-history-row"><span><b>'+e(x.begins_at||'—')+'</b><small>'+t('Serverzeit · Gefunden, kein Zombie-Siege-Ergebnis','Server time · Found, not a Zombie Siege result')+'</small></span>'+
+   '<span><strong>'+e(details.level)+'</strong><small>'+t('Festungslevel','Fortress level')+'</small></span>'+
+   '<span class="native-event-history-actor"><strong>'+e(starter)+'</strong><small>'+t('Entdecker · Logbeleg','Discoverer · log evidence')+'</small></span></article>';
+ }).filter(Boolean);
  target.querySelector('#native-records').innerHTML='<div class="native-event-intro"><p>Alle paar Tage erfassen: <strong>Level, Wellen, Ergebnis und Teilnahme</strong>. Jeder Durchgang bleibt mit Datum und verantwortlichem Officer erhalten.</p><p class="native-muted">'+(german?'Teilnahme ist ein manueller Offizierseintrag und wird ohne Beleg nicht automatisch ergänzt.':'Attendance is entered manually by an officer and is never inferred without evidence.')+'</p></div>'+
   '<div class="native-event-panels">'+groups+'</div>'+
+  '<details class="native-fold"><summary>'+t('Zombie-Festungen gefunden','Zombie fortresses found')+' ('+fortress.length+')</summary><div class="native-fold-body native-event-history">'+
+  (fortress.length?fortress.join(''):'<p class="native-muted">'+t('Keine belegten Festungsfunde gespeichert.','No confirmed fortress discoveries recorded.')+'</p>')+'</div></details>'+
   '<details class="native-fold"><summary>Weitere Events · Desert Storm ('+other.length+')</summary>'+
   '<div class="native-fold-body native-event-history">'+(other.length?other.map(eventRow).join(''):
    '<p class="native-muted">Noch keine Desert-Storm-Durchgänge dokumentiert.</p>')+'</div></details>';
