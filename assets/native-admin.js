@@ -1029,31 +1029,49 @@ export function summarizeAllianceEventRuns(source,type){
   level,bestLevel,waves,deltaLevel:level!==null&&previousLevel!==null?level-previousLevel:null,
   confirmedCount:historical.length};
 }
+// Present verified fortress discoveries alongside Zombie Siege run records.
+ // A discovery is a recorded occurrence, never evidence of victory or wave count.
+ // A same-date/level scheduled placeholder is displayed only once.
+export function unifyAllianceEventHistory(source,fortressFinds,type){
+ const runs=summarizeAllianceEventRuns(source,type).entries;
+ if(type!=='zombie_siege')return runs;
+ const discoveries=(Array.isArray(fortressFinds)?fortressFinds:[]).map(x=>{
+  let detail={};try{detail=JSON.parse(x?.settings_json||'{}')}catch{return null}
+  const date=String(x?.begins_at||'').slice(0,10);
+  if(!/^20\d{2}-\d{2}-\d{2}$/.test(date)||!Number.isInteger(detail.level)||
+   detail.level<1||detail.level>999||typeof detail.member_id!=='string'||!x?.id)return null;
+  return {id:x.id,event_type:'zombie_siege',event_date:date,level:detail.level,
+   lead_id:detail.member_id,source_name:detail.source_name||null,
+   begins_at:x.begins_at,source_kind:'fortress_found',outcome:detail.confirmed_outcome==='completed'?'completed':'found',
+   waves:null,attendance:null,source_sha256:detail.source_sha256||null};
+ }).filter(Boolean);
+ const matches=new Set(discoveries.map(x=>x.event_date+'|'+x.level));
+ return [...runs.filter(x=>!(x.outcome==='scheduled'&&matches.has(x.event_date+'|'+x.level))),
+  ...discoveries].sort((a,b)=>b.event_date.localeCompare(a.event_date)||
+   String(b.begins_at||b.updated_at||'').localeCompare(String(a.begins_at||a.updated_at||'')));
+}
 function renderEventRuns(target){
  const data=cache.ops,entries=data?.events||[];
  const names=new Map((data?.members||[]).map(m=>[m.id,m.name]));
  const german=officerLanguage(target.ownerDocument)==='de';
  const t=(de,en)=>german?de:en;
  const attendanceLabel=x=>Number.isInteger(x.attendance)?x.attendance+(german?' Teilnehmer · Offizierseintrag':' participants · officer entry'):(german?'Teilnahme nicht belegt':'Attendance not evidenced');
- const eventRow=x=>'<button type="button" class="native-event-history-row" data-native-edit="'+e(x.id)+'">'+
-  '<span><b>'+e(x.event_date)+'</b><small>'+e(reservedAutomaticStart(x)?t('Automatischer Start laut Reservierung · Ergebnis offen','Auto-started from reservation · result unknown'):x.outcome==='scheduled'&&verifiedProtocolStart(x)?'Start nachgewiesen · Ergebnis offen':allianceEventOutcomeLabels[x.outcome]||'Nicht bestätigt')+'</small></span>'+
+ const eventRow=x=>x.source_kind==='fortress_found'?
+  '<article class="native-event-history-row"><span><b>'+e(x.begins_at||x.event_date)+'</b><small>'+t(x.outcome==='completed'?'Abgeschlossen · von dir bestätigt':'Festung gefunden · Ergebnis offen',x.outcome==='completed'?'Completed · user-confirmed':'Fortress found · result unknown')+'</small></span>'+
+  '<span><strong>'+e(x.level)+'</strong><small>'+t('Level','Level')+'</small></span>'+
+  '<span class="native-event-history-actor"><strong>'+e(names.get(x.lead_id)||x.source_name||t('Spieler ungeklärt','Unlinked player'))+'</strong><small>'+t('Entdecker · Originalbeleg','Discoverer · original evidence')+'</small></span></article>':
+  '<button type="button" class="native-event-history-row" data-native-edit="'+e(x.id)+'">'+
+  '<span><b>'+e(x.event_date)+'</b><small>'+e(x.outcome==='completed'?t('Abgeschlossen','Completed'):reservedAutomaticStart(x)?t('Automatischer Start laut Reservierung · Ergebnis offen','Auto-started from reservation · result unknown'):x.outcome==='scheduled'&&verifiedProtocolStart(x)?t('Start nachgewiesen · Ergebnis offen','Start evidenced · result unknown'):allianceEventOutcomeLabels[x.outcome]||t('Nicht bestätigt','Not confirmed'))+'</small></span>'+
   '<span><strong>'+e(x.level??'—')+'</strong><small>Level</small></span>'+
   (x.event_type==='zombie_siege'?'<span><strong>'+e(x.waves??'—')+'</strong><small>Wellen</small></span>':'')+
    '<span class="native-event-history-actor">'+e(names.get(x.lead_id)||'Leitung offen')+'<small>'+e(reservedAutomaticStart(x)?t('Reserviert von Spieler','Reserved by player')+' · '+attendanceLabel(x):verifiedProtocolStart(x)?'Startender Spieler · '+attendanceLabel(x):attendanceLabel(x))+'</small></span></button>';
- const fortress=(data?.fortressFinds||[]).map(x=>{
-  let details={};try{details=JSON.parse(x.settings_json||'{}')}catch{}
-  if(!Number.isInteger(details.level)||!details.member_id)return '';
-  const starter=names.get(details.member_id)||details.source_name||t('Spieler nicht zugeordnet','Unlinked player');
-  return '<article class="native-event-history-row"><span><b>'+e(x.begins_at||'—')+'</b><small>'+t('Serverzeit · Gefunden, kein Zombie-Siege-Ergebnis','Server time · Found, not a Zombie Siege result')+'</small></span>'+
-   '<span><strong>'+e(details.level)+'</strong><small>'+t('Festungslevel','Fortress level')+'</small></span>'+
-   '<span class="native-event-history-actor"><strong>'+e(starter)+'</strong><small>'+t('Entdecker · Logbeleg','Discoverer · log evidence')+'</small></span></article>';
- }).filter(Boolean);
- const fortressHistory='<details class="native-fold"><summary>'+t('Zombie-Festungen gefunden','Zombie fortresses found')+' ('+fortress.length+')</summary><div class="native-fold-body native-event-history">'+
-  (fortress.length?fortress.join(''):'<p class="native-muted">'+t('Keine belegten Festungsfunde gespeichert.','No confirmed fortress discoveries recorded.')+'</p>')+'</div></details>';
  const groups=['zombie_siege','marshall_guard'].map(type=>{
-  const data=summarizeAllianceEventRuns(entries,type);
-  const last=data.latest,latestLevel=data.level??'—';
-  const diff=data.deltaLevel===null?'Noch kein direkter Vergleich':
+  const history=unifyAllianceEventHistory(entries,cache.ops?.fortressFinds,type);
+  const data=summarizeAllianceEventRuns(history,type);
+  const last=type==='zombie_siege'?(history[0]||null):(data.latest||history[0]||null);
+  const latestLevel=type==='zombie_siege'?(last?.level??'—'):(data.level??'—');
+  const diff=last?.source_kind==='fortress_found'&&last.outcome!=='completed'?t('Fund belegt · Ausgang offen','Discovery confirmed · result unknown'):
+   data.deltaLevel===null?'Noch kein direkter Vergleich':
    data.deltaLevel===0?'Level unverändert':(data.deltaLevel>0?'+':'')+data.deltaLevel+' Level zum vorherigen Durchgang';
   const today=new Intl.DateTimeFormat('sv-SE',{timeZone:'Europe/Berlin'}).format(new Date());
   const upcoming=data.planned.filter(x=>x.event_date>=today).sort((a,b)=>a.event_date.localeCompare(b.event_date))[0];
@@ -1064,11 +1082,11 @@ function renderEventRuns(target){
    '<h3>'+e(allianceEventLabels[type])+'</h3></div>'+
    '<button type="button" class="native-game-primary" data-native-event-quick="'+type+'">+ Durchgang</button></div>'+
    '<div class="native-event-summary">'+
-   '<div><small>Letztes Ergebnis</small><strong>'+e(last?.event_date||'—')+'</strong>'+
-    '<span>'+e(last?allianceEventOutcomeLabels[last.outcome]:'Noch nicht dokumentiert')+'</span></div>'+
+   '<div><small>'+t('Letzter Durchgang','Latest run')+'</small><strong>'+e(last?.event_date||'—')+'</strong>'+
+    '<span>'+e(last?.source_kind==='fortress_found'&&last.outcome==='completed'?t('Abgeschlossen · von dir bestätigt','Completed · user-confirmed'):last?.source_kind==='fortress_found'?t('Festung gefunden · Ergebnis offen','Fortress found · result unknown'):(last?allianceEventOutcomeLabels[last.outcome]:t('Noch nicht dokumentiert','Not yet documented')))+'</span></div>'+
    '<div><small>Letztes Level</small><strong>'+e(latestLevel)+'</strong><span>'+e(diff)+'</span></div>'+
    '<div><small>'+(type==='zombie_siege'?'Letzte Wellen':'Höchstes abgeschlossenes Level')+'</small>'+
-   '<strong>'+e(type==='zombie_siege'?data.waves??'—':data.bestLevel??'—')+'</strong>'+
+   '<strong>'+e(type==='zombie_siege'?(last?.waves??'—'):(data.bestLevel??'—'))+'</strong>'+
    '<span>'+data.confirmedCount+' dokumentierte Ergebnisse</span></div></div>'+
    (upcoming?'<p class="native-event-next">Nächster eingetragener Termin: <b>'+e(upcoming.event_date)+'</b> · Level '+e(upcoming.level??'offen')+'</p>':
    '<p class="native-muted">Kein zukünftiger Termin eingetragen. Keine automatische Terminprognose.</p>')+
@@ -1078,10 +1096,10 @@ function renderEventRuns(target){
       '<b>'+e(x.level)+'</b><small>'+e(x.event_date.slice(5))+'</small></div>').join('')+'</div>':
     '<p class="native-muted">Noch keine bestätigten Level für einen Verlauf vorhanden.</p>')+
    (data.started.length?'<p class="native-muted">'+data.started.length+' '+t('protokollierte oder automatisch ausgelöste Starts · Level nur aus Beleg; Ergebnisse ohne Abschlusslog offen.','recorded or auto-triggered starts · Levels need evidence; no completion is assumed.')+'</p>':'')+
-   '<details class="native-fold"><summary>Alle Durchgänge · '+data.entries.length+'</summary>'+
-    '<div class="native-fold-body native-event-history">'+(data.entries.length?data.entries.map(eventRow).join(''):
+   '<details class="native-fold"><summary>Alle Durchgänge · '+history.length+'</summary>'+
+    '<div class="native-fold-body native-event-history">'+(history.length?history.map(eventRow).join(''):
     '<p class="native-muted">Noch keine erfassten Durchgänge.</p>')+'</div></details>'+
-   (type==='zombie_siege'?fortressHistory:'')+'</section>';
+   '</section>';
  }).join('');
  const other=entries.filter(x=>x.event_type==='desert_storm');
  target.querySelector('#native-records').innerHTML='<div class="native-event-intro"><p>Alle paar Tage erfassen: <strong>Level, Wellen, Ergebnis und Teilnahme</strong>. Jeder Durchgang bleibt mit Datum und verantwortlichem Officer erhalten.</p><p class="native-muted">'+(german?'Teilnahme ist ein manueller Offizierseintrag und wird ohne Beleg nicht automatisch ergänzt.':'Attendance is entered manually by an officer and is never inferred without evidence.')+'</p></div>'+
