@@ -3,7 +3,7 @@
  * enrichment: original member-safe guide graphics · nav: N9 edge header + mobile bottom tabs · footer: Ft2
  * contrast: pass · mobile: pass 320/375/414/768 · slop: pass
  */
-@import url('./tokens.css?v=2026-10-26.8');
+@import url('./tokens.css?v=2026-10-27.1');
 *{box-sizing:border-box}
 html,body{overflow-x:clip}
 html{scroll-padding-block:1rem 6rem}
@@ -1513,7 +1513,10 @@ html[data-officer-mode='true'] .native-dashboard-heading{margin-top:.1rem}
 .native-admin .native-donation-tiles{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:.45rem;margin:.65rem 0}
 .native-admin .native-donation-tile{display:grid;gap:.2rem;min-width:0;
  border:1px solid var(--color-rule);border-bottom:3px solid #b68249;border-radius:6px;
- padding:.6rem .55rem;background:var(--color-panel);color:var(--color-ink)}
+ padding:0;background:var(--color-panel);color:var(--color-ink)}
+.native-admin .native-donation-tiles .native-day-mini-open{min-height:92px}
+.native-admin .native-donation-results{scroll-margin-top:1rem}
+.native-admin .native-donation-results :is(button,select,summary):focus-visible{outline:3px solid var(--color-text);outline-offset:2px}
 .native-admin .native-donation-tile small{color:var(--color-muted);font-size:.73rem;overflow-wrap:anywhere}
 .native-admin .native-donation-tile strong{font-size:clamp(1rem,2.6vw,1.4rem);overflow-wrap:anywhere;line-height:1.15}
 .native-admin .native-donation-tile span{color:var(--color-muted);font-size:.67rem;overflow-wrap:anywhere}
