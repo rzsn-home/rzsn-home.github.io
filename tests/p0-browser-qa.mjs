@@ -98,20 +98,28 @@ async function browserQA(executable,role){
   };
   await send('Page.enable');await send('Runtime.enable');
   await send('Page.addScriptToEvaluateOnNewDocument',{source:fixture(role)});
-  await send('Page.navigate',{url:`http://127.0.0.1:${server.address().port}/#today`});
-  await until(`document.documentElement.dataset.view==='today'&&Boolean(document.querySelector('.focus-panel'))`);
-  assert.equal(await evaluate(`[...document.querySelectorAll('body *')].filter(el=>{const s=getComputedStyle(el);return s.display!=='none'&&s.visibility!=='hidden'&&/gradient/i.test(s.backgroundImage)}).length`),0);
-  assert.notEqual(await evaluate(`getComputedStyle(document.querySelector('.command-hud')).borderInlineStartWidth`),'4px');
-  assert.notEqual(await evaluate(`getComputedStyle(document.querySelector('.focus-panel__main')).borderInlineStartWidth`),'4px');
-  assert.equal(await evaluate(`document.querySelectorAll('.guide-disclosure--dice-home').length`),0);
-  assert.equal(await evaluate(`document.querySelector('.dice-home-link a')?.getAttribute('href')`),'#guides/dice');
-  for(const width of [320,375,390,430])for(const theme of ['dark','light']){
-   await send('Emulation.setDeviceMetricsOverride',{width,height:820,deviceScaleFactor:2,mobile:true});
-   await send('Emulation.setEmulatedMedia',{features:[{name:'prefers-color-scheme',value:theme}]});
-   assert.ok(await evaluate(`document.documentElement.scrollWidth`)<=width,`${executable} landing ${width} ${theme}: horizontal scroll`);
+  const assertCleanDesign=async label=>{
+   const result=await evaluate(`(()=>{const gradients=[],stripes=[];for(const el of document.querySelectorAll('body *')){const s=getComputedStyle(el);if(s.display==='none'||s.visibility==='hidden')continue;const before=getComputedStyle(el,'::before'),after=getComputedStyle(el,'::after');if([s.backgroundImage,before.backgroundImage,after.backgroundImage].some(v=>/gradient/i.test(v||'')))gradients.push(el.className||el.tagName);const top=parseFloat(s.borderTopWidth)||0,bottom=parseFloat(s.borderBottomWidth)||0,start=parseFloat(s.borderInlineStartWidth)||0,end=parseFloat(s.borderInlineEndWidth)||0;if((top>=3&&top>bottom+.5)||(start>=3&&start>end+.5))stripes.push(el.className||el.tagName)}return{gradients:gradients.slice(0,8),stripes:stripes.slice(0,8)}})()`);
+   assert.equal(result.gradients.length,0,`${executable} ${label}: gradients ${result.gradients.join(', ')}`);
+   assert.equal(result.stripes.length,0,`${executable} ${label}: decorative stripes ${result.stripes.join(', ')}`);
+  };
+  for(const view of ['today','daily','vs','season','guides']){
+   await send('Page.navigate',{url:`http://127.0.0.1:${server.address().port}/#${view}`});
+   await until(`document.documentElement.dataset.view==='${view}'&&document.querySelector('#main')?.children.length>0`);
+   await assertCleanDesign(`public ${view}`);
+   if(view==='today'){
+    assert.equal(await evaluate(`document.querySelectorAll('.guide-disclosure--dice-home').length`),0);
+    assert.equal(await evaluate(`document.querySelector('.dice-home-link a')?.getAttribute('href')`),'#guides/dice');
+   }
+   for(const width of [320,390,430])for(const theme of ['dark','light']){
+    await send('Emulation.setDeviceMetricsOverride',{width,height:820,deviceScaleFactor:2,mobile:true});
+    await send('Emulation.setEmulatedMedia',{features:[{name:'prefers-color-scheme',value:theme}]});
+    assert.ok(await evaluate(`document.documentElement.scrollWidth`)<=width,`${executable} ${view} ${width} ${theme}: horizontal scroll`);
+   }
   }
   await send('Page.navigate',{url:`http://127.0.0.1:${server.address().port}/#admin`});
   await until(`Boolean(document.querySelector('#native-officer-login'))`);
+  await assertCleanDesign('admin login');
   const measures=[];
   for(const width of [320,375,390,430])for(const theme of ['dark','light']){
    await send('Emulation.setDeviceMetricsOverride',{width,height:820,deviceScaleFactor:2,mobile:true});
@@ -123,10 +131,12 @@ async function browserQA(executable,role){
   }
   await evaluate(`(()=>{const form=document.querySelector('#native-officer-login');form.elements.code.value='synthetic';form.requestSubmit()})()`);
   await until(`Boolean(document.querySelector('[data-officer-tab=more]'))`);
+  await assertCleanDesign('admin command');
   await evaluate(`document.querySelector('[data-officer-tab=more]').click()`);
   await until(`Boolean(document.querySelector('[data-officer-tab=reviews]'))`);
   await evaluate(`document.querySelector('[data-officer-tab=reviews]').click()`);
   await until(`Boolean(document.querySelector('[data-review-id=case-zero]'))`);
+  await assertCleanDesign('admin reviews');
   for(const width of [320,375,390,430])for(const theme of ['dark','light']){
    await send('Emulation.setDeviceMetricsOverride',{width,height:820,deviceScaleFactor:2,mobile:true});
    await send('Emulation.setEmulatedMedia',{features:[{name:'prefers-color-scheme',value:theme}]});
@@ -149,6 +159,7 @@ async function browserQA(executable,role){
   await until(`Boolean(document.querySelector('[data-officer-tab=duelLeague]'))`);
   await evaluate(`document.querySelector('[data-officer-tab=duelLeague]').click()`);
   await until(`Boolean(document.querySelector('.native-dl'))`);
+  await assertCleanDesign('admin duel league');
   assert.equal(await evaluate(`Boolean(document.querySelector('.native-dl-upload-form'))`),false);
   for(const width of [320,375,390,430]){
    await send('Emulation.setDeviceMetricsOverride',{width,height:820,deviceScaleFactor:2,mobile:true});
@@ -156,6 +167,7 @@ async function browserQA(executable,role){
   }
   await evaluate(`document.querySelector('[data-officer-tab=train]').click()`);
   await until(`Boolean(document.querySelector('.native-train-unlinked-dates button'))`);
+  await assertCleanDesign('admin train');
   await evaluate(`document.querySelector('.native-train-unlinked-dates button').click()`);
   assert.equal(await evaluate(`document.querySelector('#native-train-save').dataset.repairDate`),'2026-07-17');
   assert.equal(await evaluate(`Boolean(document.querySelector('#native-train-save [name=driver_name]'))`),false);
@@ -168,6 +180,7 @@ async function browserQA(executable,role){
   await until(`Boolean(document.querySelector('[data-native-member]'))`);
   await evaluate(`document.querySelector('[data-native-member]').click()`);
   await until(`document.querySelector('[data-native-alias-count]')?.textContent==='1'`);
+  await assertCleanDesign('admin member dossier');
   assert.equal(await evaluate(`document.querySelector('.native-member-aliases').open`),false);
   await evaluate(`(()=>{document.querySelector('.native-member-aliases').open=true;document.querySelector('[data-native-alias-open]').click()})()`);
   for(const width of [320,375,390,430])for(const theme of ['dark','light']){
