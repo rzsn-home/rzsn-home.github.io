@@ -506,3 +506,98 @@ body{background-color:var(--color-paper)!important}
 .dice-home-link strong{font-size:1rem;color:var(--color-ink)}
 .dice-home-link a{white-space:nowrap;font-weight:750}
 @media(max-width:30rem){.dice-home-link{align-items:flex-start;flex-direction:column;gap:.55rem}}
+
+/* Legible solid controls: restore separation lost when decorative gradients were removed. */
+:root{
+ --rzsn-control:#405b79;
+ --rzsn-control-hover:#4e6b8a;
+ --rzsn-control-border:#8fa9c4;
+ --rzsn-control-text:#f8fbff;
+ --rzsn-control-secondary:#d2e0ee;
+ --rzsn-control-secondary-text:#1e344f;
+ --rzsn-control-gold:#f7b551;
+ --rzsn-control-gold-text:#1b293b;
+}
+body button{background-color:var(--rzsn-control);color:var(--rzsn-control-text);border-color:var(--rzsn-control-border)}
+body button:hover:not(:disabled){background-color:var(--rzsn-control-hover)}
+/* Full-width navigational surfaces and menu actions use solid steel, not panel white. */
+.guide-category-choice,
+.native-mission,
+.native-admin .native-admin-nav .native-primary-tab,
+.native-admin .native-admin-nav .native-admin-more>summary,
+.native-admin .native-dashboard-mini-tile,
+.native-admin .native-day-mini-open,
+.native-admin .native-vs-day-link,
+.native-admin .native-donation-person button,
+.native-admin .native-more-group>div>button:not([aria-current='page']),
+.native-admin .native-hub-tile,
+.native-admin .native-hub-return button,
+.native-admin .native-audit-open-type,
+.native-admin .native-audit-load{
+ background-color:var(--rzsn-control)!important;
+ color:var(--rzsn-control-text)!important;
+ border-color:var(--rzsn-control-border);
+}
+.guide-category-choice :is(strong,span),
+.native-admin .native-dashboard-mini-tile :is(span,strong,small),
+.native-admin .native-day-mini-open :is(strong,small,span),
+.native-admin .native-vs-day-link small,
+.native-admin .native-hub-tile-copy :is(strong,small),
+.native-admin .native-hub-tile-chevron{color:var(--rzsn-control-text)!important}
+.native-admin .native-day-mini-open .bad{color:#ffce80!important}
+.native-admin .native-admin-nav .native-primary-tab[aria-current='page'],
+.native-admin .native-more-group>div>button[aria-current='page'],
+.main-nav a[aria-current='page'],
+.primary-link,.setup-continue,
+.native-shortcuts button:first-child,.native-game-primary,
+.native-train-today button,
+.native-admin .native-audit-types>button[aria-pressed='true']{
+ background-color:var(--rzsn-control-gold)!important;
+ color:var(--rzsn-control-gold-text)!important;
+ border-color:#a87535;
+}
+.main-nav a[aria-current='page'] .nav-icon,
+.native-admin .native-admin-nav .native-primary-tab[aria-current='page'] .native-tab-icon{
+ color:var(--rzsn-control-gold-text)!important;
+}
+/* Preserve quiet outlined controls and give visible hover/focus/disabled states. */
+body button:disabled{opacity:.65}
+.guide-category-choice:is(:hover,:focus-visible),
+.native-admin :is(.native-hub-tile,.native-dashboard-mini-tile,.native-day-mini-open):is(:hover,:focus-visible){
+ background-color:var(--rzsn-control-hover)!important;
+}
+/* Filters, VS/Spenden drilldowns and officer navigation need the same control hierarchy. */
+.task-filters button:not([aria-pressed='true']),
+.guide-filters button:not([aria-pressed='true']),
+.week-selector button:not([aria-pressed='true']),
+.native-admin-subnav button:not([aria-current='page']),
+.native-admin .native-vs-tool,
+.native-admin .native-vs-result-tools button,
+.native-admin .native-vs-group-footer button,
+.native-admin .native-vs-day-filters button:not([aria-pressed='true']),
+.native-admin .native-dashboard-quick-link{
+ background-color:var(--rzsn-control)!important;
+ color:var(--rzsn-control-text)!important;
+ border-color:var(--rzsn-control-border);
+}
+.task-filters button[aria-pressed='true'],
+.guide-filters button[aria-pressed='true'],
+.native-admin-subnav button[aria-current='page'],
+.native-admin .native-vs-day-filters button[aria-pressed='true'],
+.native-admin .native-day-mini-open[aria-pressed='true']{
+ background-color:var(--rzsn-control-gold)!important;
+ color:var(--rzsn-control-gold-text)!important;
+ border-color:#a87535;
+}
+.native-admin .native-day-mini-open[aria-pressed='true'] :is(strong,small,span){
+ color:var(--rzsn-control-gold-text)!important;
+}
+.week-selector button:not([aria-pressed='true']) :is(span,small){
+ color:var(--rzsn-control-text)!important;
+}
+/* Dark panel summaries retain light lettering in both Light and Dark themes. */
+.task-group>summary,.roadmap-disclosure>summary,
+.guide-disclosure>summary,.guide-roadmap-week>summary{
+ color:var(--rzsn-control-text)!important;
+}
+body button:focus-visible,.guide-category-choice:focus-visible{outline:3px solid var(--color-focus);outline-offset:2px}

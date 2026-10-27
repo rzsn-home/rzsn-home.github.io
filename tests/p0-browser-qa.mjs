@@ -103,6 +103,13 @@ async function browserQA(executable,role){
    assert.equal(result.gradients.length,0,`${executable} ${label}: gradients ${result.gradients.join(', ')}`);
    assert.equal(result.stripes.length,0,`${executable} ${label}: decorative stripes ${result.stripes.join(', ')}`);
   };
+  const assertControlContrast=async(selector,label)=>{
+   const expression="(()=>{const el=document.querySelector("+JSON.stringify(selector)+");if(!el)return null;const style=getComputedStyle(el);const parse=c=>{const m=c.match(/[\\d.]+/g);return m?m.slice(0,3).map(Number):null};const lum=c=>{const rgb=parse(c);if(!rgb)return 0;return rgb.map(v=>{v/=255;return v<=.04045?v/12.92:((v+.055)/1.055)**2.4}).reduce((a,v,i)=>a+v*[.2126,.7152,.0722][i],0)};const a=lum(style.color),b=lum(style.backgroundColor);return{fg:style.color,bg:style.backgroundColor,contrast:(Math.max(a,b)+.05)/(Math.min(a,b)+.05)}})()";
+   const result=await evaluate(expression);
+   if(!result)return;
+   assert.ok(result.contrast>=4.5,label+': low control text contrast '+JSON.stringify(result));
+   assert.notEqual(result.bg,'rgba(0, 0, 0, 0)',label+': transparent control');
+  };
   for(const view of ['today','daily','vs','season','guides']){
    await send('Page.navigate',{url:`http://127.0.0.1:${server.address().port}/#${view}`});
    await until(`document.documentElement.dataset.view==='${view}'&&document.querySelector('#main')?.children.length>0`);
@@ -115,6 +122,8 @@ async function browserQA(executable,role){
     await send('Emulation.setDeviceMetricsOverride',{width,height:820,deviceScaleFactor:2,mobile:true});
     await send('Emulation.setEmulatedMedia',{features:[{name:'prefers-color-scheme',value:theme}]});
     assert.ok(await evaluate(`document.documentElement.scrollWidth`)<=width,`${executable} ${view} ${width} ${theme}: horizontal scroll`);
+    const control={today:'.primary-link',daily:'.task-filters button',vs:'.week-selector button',season:'.season-command__secondary>button',guides:'.guide-category-choice'}[view];
+    await assertControlContrast(control,`${executable} ${view} ${width} ${theme}`);
    }
   }
   await send('Page.navigate',{url:`http://127.0.0.1:${server.address().port}/#admin`});
@@ -132,6 +141,11 @@ async function browserQA(executable,role){
   await evaluate(`(()=>{const form=document.querySelector('#native-officer-login');form.elements.code.value='synthetic';form.requestSubmit()})()`);
   await until(`Boolean(document.querySelector('[data-officer-tab=more]'))`);
   await assertCleanDesign('admin command');
+  for(const theme of ['dark','light']){
+   await send('Emulation.setEmulatedMedia',{features:[{name:'prefers-color-scheme',value:theme}]});
+   await assertControlContrast('.native-admin .native-admin-nav .native-primary-tab',`admin primary tab ${theme}`);
+   await assertControlContrast('.native-admin .native-dashboard-mini-tile',`admin command tile ${theme}`);
+  }
   await evaluate(`document.querySelector('[data-officer-tab=more]').click()`);
   await until(`Boolean(document.querySelector('[data-officer-tab=reviews]'))`);
   await evaluate(`document.querySelector('[data-officer-tab=reviews]').click()`);

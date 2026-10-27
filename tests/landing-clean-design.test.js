@@ -18,6 +18,15 @@ test('site-wide CSS contains no decorative gradients or thick top/left card stri
  assert.match(overview,/\.focus-panel__main\{border-inline-start:0!important\}/);
 });
 
+test('solid buttons remain distinct from page panels with readable selected states',()=>{
+ assert.match(overview,/--rzsn-control:#405b79/);
+ assert.match(overview,/body button\{background-color:var\(--rzsn-control\);color:var\(--rzsn-control-text\)/);
+ assert.match(overview,/\.native-admin \.native-day-mini-open/);
+ assert.match(overview,/\.native-admin \.native-vs-day-filters button\[aria-pressed='true'\]/);
+ assert.match(overview,/background-color:var\(--rzsn-control-gold\)!important/);
+ assert.match(overview,/\.native-admin \.native-admin-nav \.native-primary-tab/);
+});
+
 test('lower Dice history is a direct guide link, not a generic accordion',()=>{
  const start=app.indexOf('function diceHome()');
  const end=app.indexOf('function today()',start);
