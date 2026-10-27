@@ -421,3 +421,46 @@ details>.guide-gallery>.guide-card{padding:0;border:0;border-radius:0;background
   .task-line>.task-detail[open]{padding:.5rem .6rem}
   .task-line>.task-detail .task-detail-body{padding:.55rem .1rem .2rem}
 }
+
+/* Landing cleanup: keep the Today view purposeful, not template-decorative. */
+html[data-view='today'] body,
+html[data-view='today'] body *,
+html[data-view='today'] body *::before,
+html[data-view='today'] body *::after{
+  background-image:none!important;
+}
+html[data-view='today'] body{background:var(--color-paper)!important}
+html[data-view='today'] .site-header,
+html[data-view='today'] .main-nav{background:var(--color-game-bar)!important}
+html[data-view='today'] .site-header .language select,
+html[data-view='today'] .site-header .theme-toggle{background:var(--color-game-bar)!important}
+html[data-view='today'] .main-nav a[aria-current='page'],
+html[data-view='today'] .primary-link,
+html[data-view='today'] .setup-continue{background:var(--color-game-orange)!important}
+html[data-view='today'] .command-hud__cells,
+html[data-view='today'] .focus-panel__main{background:var(--color-panel)!important}
+html[data-view='today'] .task-row .mission-icon{background:var(--color-game-bar)!important}
+html[data-view='today'] .task-row[data-done='true'] .mission-icon{background:var(--color-game-orange)!important}
+html[data-view='today'] .command-hud progress::-webkit-progress-value,
+html[data-view='today'] .task-progress progress::-webkit-progress-value{background:var(--color-game-orange)!important}
+html[data-view='today'] .command-hud progress::-moz-progress-bar,
+html[data-view='today'] .task-progress progress::-moz-progress-bar{background:var(--color-game-orange)!important}
+html[data-view='today'] .command-hud{
+  border-inline-start-width:1px!important;
+  border-inline-start-color:var(--color-game-rim)!important;
+}
+html[data-view='today'] .focus-panel__main{border-inline-start:0!important}
+html[data-view='today'] .enemy-buster{border-top-width:2px!important}
+html[data-view='today'] .section>h2{border-inline-start:0!important;padding-inline-start:0!important}
+html[data-view='today'] .dice-home-link{
+  display:flex;align-items:center;justify-content:space-between;gap:1rem;
+  margin-top:1.6rem;padding-top:1rem;border-top:1px solid var(--color-rule);
+}
+html[data-view='today'] .dice-home-link>div{display:grid;gap:.18rem;min-width:0}
+html[data-view='today'] .dice-home-link small,
+html[data-view='today'] .dice-home-link span{color:var(--color-muted)}
+html[data-view='today'] .dice-home-link strong{font-size:1rem;color:var(--color-ink)}
+html[data-view='today'] .dice-home-link a{white-space:nowrap;font-weight:750}
+@media(max-width:30rem){
+  html[data-view='today'] .dice-home-link{align-items:flex-start;flex-direction:column;gap:.55rem}
+}

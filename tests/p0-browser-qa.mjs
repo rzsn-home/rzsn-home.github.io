@@ -98,6 +98,18 @@ async function browserQA(executable,role){
   };
   await send('Page.enable');await send('Runtime.enable');
   await send('Page.addScriptToEvaluateOnNewDocument',{source:fixture(role)});
+  await send('Page.navigate',{url:`http://127.0.0.1:${server.address().port}/#today`});
+  await until(`document.documentElement.dataset.view==='today'&&Boolean(document.querySelector('.focus-panel'))`);
+  assert.equal(await evaluate(`[...document.querySelectorAll('body *')].filter(el=>{const s=getComputedStyle(el);return s.display!=='none'&&s.visibility!=='hidden'&&/gradient/i.test(s.backgroundImage)}).length`),0);
+  assert.notEqual(await evaluate(`getComputedStyle(document.querySelector('.command-hud')).borderInlineStartWidth`),'4px');
+  assert.notEqual(await evaluate(`getComputedStyle(document.querySelector('.focus-panel__main')).borderInlineStartWidth`),'4px');
+  assert.equal(await evaluate(`document.querySelectorAll('.guide-disclosure--dice-home').length`),0);
+  assert.equal(await evaluate(`document.querySelector('.dice-home-link a')?.getAttribute('href')`),'#guides/dice');
+  for(const width of [320,375,390,430])for(const theme of ['dark','light']){
+   await send('Emulation.setDeviceMetricsOverride',{width,height:820,deviceScaleFactor:2,mobile:true});
+   await send('Emulation.setEmulatedMedia',{features:[{name:'prefers-color-scheme',value:theme}]});
+   assert.ok(await evaluate(`document.documentElement.scrollWidth`)<=width,`${executable} landing ${width} ${theme}: horizontal scroll`);
+  }
   await send('Page.navigate',{url:`http://127.0.0.1:${server.address().port}/#admin`});
   await until(`Boolean(document.querySelector('#native-officer-login'))`);
   const measures=[];

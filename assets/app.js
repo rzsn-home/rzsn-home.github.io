@@ -349,14 +349,13 @@ function nextRoadmapText(s=state) {
   return next ? `${t('seasonDay')} ${next.day} · ${t(next.label)}` : t('post');
 }
 function diceHome(){
- return '<details class="guide-disclosure guide-disclosure--dice-home">'+
- '<summary>'+(lang==='de'?'Dice Gewinner':'Dice Game Winners')+' · '+HISTORY.length+'</summary>'+
- '<div class="guide-card guide-card--inside"><p>'+
- escape(lang==='de'?'Bestätigte Gewinner aus der Zugliste. Ohne Namen kein bestätigter Gewinn.':
- 'Confirmed winners from the train sheet; unnamed entries are not counted.')+'</p>'+
- '<ul class="dice-winners-list">'+[...HISTORY].reverse().map(w=>
- '<li><time datetime="'+escape(w.ride_date)+'">'+escape(w.ride_date)+'</time> — <strong>'+
- escape(w.winner_name)+'</strong></li>').join('')+'</ul></div></details>';
+ const latest=HISTORY.at(-1);
+ const label=lang==='de'?'Dice Gewinner':'Dice Game Winners';
+ const note=lang==='de'?'Bestätigte Gewinner aus der Zugliste':'Confirmed winners from the train sheet';
+ return '<section class="dice-home-link" aria-label="'+escape(label)+'">'+
+  '<div><small>'+escape(note)+'</small><strong>'+escape(label)+' · '+HISTORY.length+'</strong>'+
+  (latest?'<span>'+escape(latest.ride_date)+' · '+escape(latest.winner_name)+'</span>':'')+'</div>'+
+  '<a href="'+guideHash('dice')+'">'+escape(lang==='de'?'Alle ansehen':'View all')+' →</a></section>';
 }
 function today() {
   const guide=DAILY_GUIDES[state.weekday];
@@ -636,6 +635,7 @@ function render({focus = false,preserve = false} = {}) {
   const route=memberRoute(location.hash);
   if (route.view === 'main') { main.focus(); return; }
   currentView = Object.hasOwn(views,route.view) ? route.view : 'today';
+  document.documentElement.dataset.view=currentView;
   document.documentElement.dataset.officerMode=String(currentView==='admin');
   if(currentView==='guides' && route.guideId){guideTopicSelected=guideTopicOf(route.guideId);guideSearchQuery='';}
   else if(currentView==='guides'&&!preserve){guideTopicSelected='';guideSearchQuery='';}
