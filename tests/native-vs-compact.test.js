@@ -44,7 +44,7 @@ test('VS data starts compact with under-target and day breakdown collapsed, whil
  assert.ok([...groups].every(group=>!group.open),'all VS player groups start collapsed');
  assert.equal(q('.native-vs-days'),null,'old oversized day accordion has been removed');
  assert.equal(mount.querySelectorAll('.native-day-mini').length,6,'six weekday comparisons immediately visible');
- assert.equal(mount.querySelectorAll('.native-vs-kpi').length,3,'metrics remain compact and visible');
+ assert.equal(mount.querySelectorAll('.native-vs-kpi').length,5,'metrics remain compact and visible');
  assert.equal(q('.native-vs-priority-note'),null,'duplicated warning callout removed');
  groups[0].querySelector('summary').click();
  assert.equal(groups[0].open,true,'an officer can expand under-target members');
@@ -68,7 +68,7 @@ test('day tiles reveal attributable scores, categories, sorting and pagination w
  people.push({id:'met',name:'Winner',rank:'R3',failed:0,unknown:0,days:Array.from({length:6},(_,weekday)=>({weekday,verified:true,points:5000000,passed:true}))},
   {id:'missing',name:'Missing',failed:0,unknown:1,days:[{weekday:0,verified:false,points:10000000}]},
   {id:'joined',name:'Newcomer',failed:0,unknown:0,beforeJoin:1,days:[{weekday:0,quality:'before_join'}]});
- const weeks=['2026-W43','2026-W42'].map(week=>({week,threshold:3600000,failedDays:25,unknownDays:1,perfect:1,
+ const weeks=['2026-W44','2026-W42'].map(week=>({week,state:'final',threshold:3600000,failedDays:25,unknownDays:1,perfect:1,
   dayTotals:[{weekday:0,passed:1,failed:25,unknown:1,beforeJoin:1}],members:people}));
  const requests=[];
  globalThis.fetch=async url=>{
@@ -91,8 +91,12 @@ test('day tiles reveal attributable scores, categories, sorting and pagination w
  q('form').dispatchEvent(new dom.window.Event('submit',{bubbles:true,cancelable:true}));
  await until(()=>q('[data-officer-tab=vs]'));q('[data-officer-tab=vs]').click();await until(()=>q('[data-native-vs-day]'));
  assert.equal(rows().length,10,'long groups start with ten rows');
+ assert.match(q('.native-capture-state.is-final').textContent,/Finalisiert/);
+ assert.match(q('.native-capture-banner').textContent,/W44/);
+ assert.equal(q('#native-vs-body .native-vs-trends,#native-vs-body svg'),null);
+ assert.doesNotMatch(q('.native-day-overview-grid').textContent,/Vortag|[+\u2212]/);
  q('[data-native-vs-day="0"]').click();
- assert.match(q('#native-vs-results-title').textContent,/Montag.*2026-W43/);
+ assert.match(q('#native-vs-results-title').textContent,/Montag.*2026-W44/);
  assert.equal(q('[data-native-vs-day="0"]').getAttribute('aria-pressed'),'true');
  assert.equal(dom.window.document.activeElement,q('#native-vs-results-title'));
  assert.equal(q('[data-native-vs-group=low]').open,true);
@@ -119,10 +123,6 @@ test('day tiles reveal attributable scores, categories, sorting and pagination w
  assert.equal(mount.querySelectorAll('.native-vs-player').length,1,'search reaches players beyond the initial page');
  assert.match(q('[data-native-vs-category=low]').textContent,/25/,'search does not change original day counts');
  search.value='Player 00';search.dispatchEvent(new dom.window.Event('input',{bubbles:true}));
- q('.native-vs-player > summary').click();const original=q('#native-vs-results');
- q('[data-native-member=low-0]').click();await until(()=>q('[data-native-member-close]'));q('[data-native-member-close]').click();
- assert.equal(q('#native-vs-results'),original);assert.equal(q('#native-vs-search').value,'Player 00');
- assert.equal(q('[data-native-vs-day="0"]').getAttribute('aria-pressed'),'true');
  q('[data-native-vs-weekly]').click();assert.match(q('#native-vs-results-title').textContent,/Spieler nach Ergebnis/);
  assert.equal(q('#native-vs-search').value,'');assert.equal(q('[data-native-vs-category]'),null);
  q('[data-native-vs-day="0"]').click();change('#native-vs-week','2026-W42');
@@ -130,41 +130,6 @@ test('day tiles reveal attributable scores, categories, sorting and pagination w
  assert.equal(q('[data-native-vs-day="0"]').getAttribute('aria-pressed'),'false');
  assert.equal(q('#native-vs-sort').value,'rank','week changes preserve selected ordering');
  assert.equal(requests.filter(path=>path==='/api/vs-intelligence').length,1,'day/category/week/sort/search/pagination use the already loaded VS data');
- assert.equal(requests.filter(path=>path==='/api/overview').length,1,'overview is reused by the VS report');
- assert.equal(requests.filter(path=>path==='/api/train-manager').length,1,'opening a profile reuses the train list');
-});
 
-test('short-lived officer reads expire, refresh explicitly and stop requests after a D1 daily limit',async t=>{
- const dom=new JSDOM('<main id="mount"></main>',{url:'https://lunas-empire.github.io/#admin'});
- const oldWindow=globalThis.window,oldFetch=globalThis.fetch;globalThis.window=dom.window;
- let now=Date.parse('2026-10-26T12:00:00Z'),limited=false;
- t.mock.method(Date,'now',()=>now);
- t.after(()=>{clearOfficer();globalThis.window=oldWindow;globalThis.fetch=oldFetch;dom.window.close()});
- const calls=[];
- globalThis.fetch=async url=>{
-  const path=new URL(url).pathname;calls.push(path);
-  if(limited)return Response.json({code:'D1_READ_LIMIT',error:'Daily row read limit reached'},{status:503});
-  if(path==='/api/native-login')return Response.json({token:'synthetic',name:'Officer',role:'R4'});
-  if(path==='/api/overview')return Response.json({active:1,reviews:0});
-  if(path==='/api/operations')return Response.json({tasks:[],events:[],members:[]});
-  if(path==='/api/train-manager')return Response.json({today:'2026-10-26',history:[],calendar:[],counts:{}});
-  if(path==='/api/officer-alerts')return Response.json({});
-  if(path==='/api/vs-intelligence')return Response.json({weeks:[{week:'2026-W43',members:[]}]});
-  throw Error('Unexpected synthetic path '+path);
- };
- const mount=dom.window.document.querySelector('#mount'),q=selector=>mount.querySelector(selector);
- const until=async predicate=>{for(let n=0;n<120;n++){if(predicate())return;await new Promise(r=>setTimeout(r,5))}assert.ok(predicate(),'render timeout')};
- initNativeAdmin(mount);await renderNativeAdmin(mount);q('[name=code]').value='synthetic';
- q('form').dispatchEvent(new dom.window.Event('submit',{bubbles:true,cancelable:true}));await until(()=>q('.native-dashboard'));
- q('[data-officer-tab=vs]').click();await until(()=>q('#native-vs-results'));const afterFirst=calls.length;
- q('[data-officer-tab=overview]').click();await until(()=>q('.native-dashboard'));assert.equal(calls.length,afterFirst,'navigation reuses live-memory responses');
- now+=60001;q('[data-officer-tab=vs]').click();await until(()=>q('#native-vs-results'));
- assert.equal(calls.filter(path=>path==='/api/vs-intelligence').length,2,'old data expires after one minute');
- q('[data-native-refresh]').click();await until(()=>q('#native-vs-results'));
- assert.equal(calls.filter(path=>path==='/api/vs-intelligence').length,3,'manual refresh bypasses reuse');
- limited=true;q('[data-native-refresh]').click();await until(()=>q('[role=alert]'));
- assert.match(q('[role=alert]').textContent,/Leselimit.*00:00 UTC/);
- const afterLimit=calls.length;q('[data-native-refresh]').click();await until(()=>q('[role=alert]'));
- q('[data-officer-tab=overview]').click();await until(()=>q('[role=alert]'));assert.equal(calls.length,afterLimit,'no retries reach D1 while its day is blocked');
- now=Date.parse('2026-10-27T00:00:00Z');limited=false;q('[data-native-refresh]').click();await until(()=>q('.native-dashboard'));assert.ok(calls.length>afterLimit,'automatic unlock at UTC reset');
+
 });

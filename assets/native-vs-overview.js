@@ -120,6 +120,7 @@ export function renderVsOverview(week,policy={},api={}){
   ['Spieler','players'],
   ['Ziel','goal']
  ];
+ translated.unshift(['bestätigten IDs','confirmed IDs'],[' IDs im Umfang',' IDs in scope'],['% der ','% of '],['Sortieren nach','Sort by'],['Tage unter Ziel','Days below goal'],['Punkte: höchste zuerst','Points: highest first'],['Punkte: niedrigste zuerst','Points: lowest first']);
  const loc=html=>(language==='de'?html:translated.reduce((s,[a,b])=>s.replaceAll(a,b),html))
   .replace(/__RZSN_PRIVATE_(\d+)__/g,(token,index)=>privateText[Number(index)]??token);
 
@@ -142,6 +143,7 @@ export function renderVsOverview(week,policy={},api={}){
     '<button type="button" class="native-day-mini-open" data-native-vs-day="'+i+'" aria-pressed="'+(view.day===i)+'" aria-controls="native-vs-results">'+
     '<span class="native-day-mini-heading"><strong>'+label+'</strong><span>'+ (eligible?Math.min(100,Math.round(100*(pass+failed)/eligible)):0)+'% erfasst</span></span>'+
     '<strong class="native-day-mini-count">'+pass+'<small> Ziel erreicht</small></strong>'+
+    '<small>'+(d?.attainmentPercent==null?'?':n(Math.round(d.attainmentPercent)))+'% der '+(pass+failed)+' bestätigten IDs · '+(week.scopeMembers??members.length)+' IDs im Umfang</small>'+
     '<span class="native-day-mini-meta"><span class="bad">'+failed+' unter</span><span>'+unknown+' unklar</span>'+(beforeJoin?'<span>'+beforeJoin+' vor Beitritt</span>':'')+'</span>'+
     '</button></article>';
   }).join('')+'</div></section>';
@@ -203,4 +205,38 @@ export function renderVsOverview(week,policy={},api={}){
    (!members.length?'<p class="native-muted">Noch keine Spieler für diese Woche.</p>':'')+
    '<p class="native-muted" data-native-vs-search-empty role="status" '+(result.matchingCount||!members.length?'hidden':'')+'>'+tr('Keine Spieler gefunden.')+'</p></div></section>';
  return {freshness:loc(h),dayTiles:loc(dayTiles),groupsHtml:loc(groupsHtml)};
+}
+
+// Derived locally from the existing authorized API; no new backend fields required.
+export function enrichVsWeeks(data){
+ data.weeks ||= [];
+ for(const w of data.weeks){
+  w.members ||= [];w.missingMembers ||= [];
+  for(const p of [...w.members,...w.missingMembers]){
+   const original=p.days||[];
+   p.days=Array.from({length:6},(_,weekday)=>{
+    const rows=original.filter(d=>d.weekday===weekday),d=rows.length===1?rows[0]:null;
+    const verified=Boolean(d&&d.verified===true&&Number.isSafeInteger(d.points)&&d.points>=0);
+    return {...(d||{}),weekday,verified,points:verified?d.points:null,passed:verified?(Number.isSafeInteger(w.threshold)?d.points>=w.threshold:d.passed):null};
+   });
+   const total=derivedVsWeekTotal(p.days);p.weekly_points=total.total;p.partial_week_points=total.partial;p.verified=total.confirmed;
+   p.passed=p.days.filter(d=>d.verified&&d.passed===true).length;
+  }
+  w.dayTotals=(w.dayTotals?.length?w.dayTotals:Array.from({length:6},(_,weekday)=>({weekday,passed:w.members.filter(p=>p.days[weekday].verified&&p.days[weekday].passed===true).length,failed:w.members.filter(p=>p.days[weekday].verified&&p.days[weekday].passed===false).length})));
+  w.verifiedDays=w.members.reduce((n,p)=>n+p.verified,0);
+ }
+ for(const w of data.weeks){
+  const people=[...(w.members||[]),...(w.missingMembers||[])];
+  w.scopeMembers=people.length;
+  w.metPlayerDays=w.members.reduce((n,p)=>n+p.passed,0);
+  w.affectedMembers=w.members.filter(p=>p.failed>0).length;
+  w.scopePlayerDays=people.length*6-(w.beforeJoinDays||0);
+  for(const d of w.dayTotals){
+   d.unknown=people.filter(p=>!p.days?.[d.weekday]?.verified&&p.days?.[d.weekday]?.eligible!==false).length;
+   const known=d.passed+d.failed;
+   d.attainmentPercent=known?100*d.passed/known:null;
+  }
+  w.unknownDays=w.dayTotals.reduce((n,d)=>n+d.unknown,0);
+ }
+ return data;
 }

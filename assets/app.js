@@ -18,7 +18,7 @@ import { guideNavText } from './guide-library-nav-i18n.js';
 import { guideLanding, guideTopicSection } from './guide-library-ui.js';
 import { updateGuideLibrary } from './guide-library-filter.js';
 import { memberRoute, guideHash, guideUrl } from './guide-links.js';
-import { DAY_MS, WEEKDAYS, guideState, berlinParts, selectedDate, checklistKey, armsWindow, availableTask, enemyBusterPhase, seasonEventInstant } from './engine.js';
+import { DAY_MS, WEEKDAYS, guideState, selectedDate, checklistKey, armsWindow, availableTask, enemyBusterPhase, seasonEventInstant } from './engine.js';
 import { createStorage, checkedMap } from './storage.js';
 import { OVERVIEW_COPY } from './overview-i18n.js';
 import { localizeTerms, armsPhase, termLabel } from './terminology.js';
@@ -226,15 +226,10 @@ function serverTime(s=state) {
   const minutes=s.serverMinute%60;
   return `${String(hours).padStart(2,'0')}:${String(minutes).padStart(2,'0')} ST`;
 }
-// Convert the next actual 00:00 ST instant into Berlin civil time. No fixed 03/04 hour.
-function berlinResetLabel(s=state) {
-  const local=berlinParts(nextReset(s));
-  return `${local.hour}:${local.minute}`;
-}
 function commandHud(items) {
   const stats=taskProgress(items);
   const points=new Intl.NumberFormat(LOCALES[lang],{notation:'compact',maximumFractionDigits:1}).format(ALLIANCE_CONFIG.vsDailyMinimum);
-  return `<section class="command-hud" aria-label="${escape(hudText(lang,'commandCenter'))}"><div class="command-hud__cells"><div class="command-hud__cell" data-hud-vs-target="${ALLIANCE_CONFIG.vsDailyMinimum}"><span>${escape(hudText(lang,'vsTarget'))}</span><strong>${escape(points)}</strong><small>${escape(hudText(lang,'allianceTarget'))}</small></div><div class="command-hud__cell" data-hud-tasks data-refs="${escape(JSON.stringify(items.map(item=>item.refs)))}"><span>${escape(hudText(lang,'tasksComplete'))}</span><strong data-hud-task-count>${stats.done} / ${stats.total}</strong><progress value="${stats.done}" max="${stats.total||1}" aria-label="${escape(hudText(lang,'tasksComplete'))}" data-hud-progress></progress></div><div class="command-hud__cell"><span>${escape(hudText(lang,'serverTime'))}</span><strong data-server-time data-server-minute="${state.serverMinute}">${serverTime()}</strong><small data-server-time-anchor>${escape(hudText(lang,'timeAnchor',{localTime:berlinResetLabel()}))}</small></div></div></section>`;
+  return `<section class="command-hud" aria-label="${escape(hudText(lang,'commandCenter'))}"><div class="command-hud__cells"><div class="command-hud__cell" data-hud-vs-target="${ALLIANCE_CONFIG.vsDailyMinimum}"><span>${escape(hudText(lang,'vsTarget'))}</span><strong>${escape(points)}</strong><small>${escape(hudText(lang,'allianceTarget'))}</small></div><div class="command-hud__cell" data-hud-tasks data-refs="${escape(JSON.stringify(items.map(item=>item.refs)))}"><span>${escape(hudText(lang,'tasksComplete'))}</span><strong data-hud-task-count>${stats.done} / ${stats.total}</strong><progress value="${stats.done}" max="${stats.total||1}" aria-label="${escape(hudText(lang,'tasksComplete'))}" data-hud-progress></progress></div><div class="command-hud__cell"><span>${escape(hudText(lang,'serverTime'))}</span><strong data-server-time data-server-minute="${state.serverMinute}">${serverTime()}</strong><small>${escape(hudText(lang,'timeAnchor'))}</small></div></div></section>`;
 }
 function remainingReset() {
   const minutes=Math.max(0,Math.ceil((nextReset(state)-state.now)/60000));
@@ -474,6 +469,7 @@ function guides() {
   return `${guideContextBar()}<h1>${tx('guides')}</h1>${notice()}${search}${landing}<div class="guide-library">${alliance}${power}${vs}${season}${economy}</div>`;
 }
 function adminView(){
+  if(location.hostname==='rzsn-home.github.io')return `<h1>${tx('admin')}</h1>${paragraph('adminPending')}`;
   return '<div id="native-officer-root" aria-live="polite"></div>';
 }
 const views = {today,daily,vs,season,guides,admin:adminView};
@@ -502,6 +498,8 @@ function syncChrome() {
     if (a.hash === `#${currentView}`) a.setAttribute('aria-current','page');
     else a.removeAttribute('aria-current');
   });
+  document.querySelector('#admin-link').toggleAttribute('aria-current',currentView==='admin');
+  if(currentView==='admin')document.querySelector('#admin-link').setAttribute('aria-current','page');
   showStorageError();
 }
 function showStorageError() {
@@ -633,20 +631,27 @@ function applyGuideFilters() {
   updateGuideLibrary(main,{topic:guideTopicSelected,query:guideSearchQuery,locale:LOCALES[lang],resultText:guideNavText(lang,'count')});
 }
 function render({focus = false,preserve = false} = {}) {
-  const route=memberRoute(location.hash);
+  const nativeReview=location.hash==='#admin-review'&&location.hostname!=='rzsn-home.github.io';
+  const route=memberRoute(nativeReview?'#admin':location.hash);
   if (route.view === 'main') { main.focus(); return; }
   currentView = Object.hasOwn(views,route.view) ? route.view : 'today';
-  document.documentElement.dataset.officerMode=String(currentView==='admin');
+  document.documentElement.dataset.officerMode=String(currentView==='admin'&&location.hostname!=='rzsn-home.github.io');
   if(currentView==='guides' && route.guideId){guideTopicSelected=guideTopicOf(route.guideId);guideSearchQuery='';}
   else if(currentView==='guides'&&!preserve){guideTopicSelected='';guideSearchQuery='';}
   const open = preserve ? new Set([...main.querySelectorAll('details[open][data-disclosure]')].map(el=>el.dataset.disclosure)) : null;
-  main.innerHTML = views[currentView]();
-  if(currentView==='admin'){
+  const retainedMount=currentView==='admin' ? main.querySelector('#native-officer-root') : null;
+  if(!retainedMount) main.innerHTML = views[currentView]();
+  if(currentView==='admin'&&location.hostname!=='rzsn-home.github.io'){
     import('./native-admin.js').then(async mod=>{
       const mount=main.querySelector('#native-officer-root');
       if(!mount)return;
+      mount.lang=lang;
+      mount.dir=lang==='ar'?'rtl':'ltr';
       mod.initNativeAdmin(mount);
-      await mod.renderNativeAdmin(mount);
+      if(nativeReview&&(!retainedMount||!preserve)){
+        await mod.openNativeReviews(mount);
+        if(!mod.hasOfficer())await mod.renderNativeAdmin(mount);
+      }else if(!retainedMount||preserve)await mod.renderNativeAdmin(mount);
     }).catch(error=>{
       const mount=main.querySelector('#native-officer-root');
       if(mount)mount.textContent='Adminansicht derzeit nicht verfügbar: '+error.message;
@@ -674,7 +679,6 @@ function refreshClock() {
     document.querySelectorAll('[data-arms-state]').forEach(el=>{const phase=armsWindow(state,DAILY_GUIDES[state.weekday]);el.textContent=t(phase);el.dataset.state=phase;});
     document.querySelectorAll('[data-reset-countdown]').forEach(el=>{el.textContent=remainingReset();});
     document.querySelectorAll('[data-server-time]').forEach(el=>{el.textContent=serverTime();el.dataset.serverMinute=String(state.serverMinute);});
-    document.querySelectorAll('[data-server-time-anchor]').forEach(el=>{el.textContent=hudText(lang,'timeAnchor',{localTime:berlinResetLabel()});});
   }
 }
 const languageEntries = Object.entries(LANGUAGES).sort(([a],[b])=>a==='en'?-1:b==='en'?1:0);

@@ -1,11 +1,11 @@
 /** Native Luna officer workspace. Private data is held only in a live memory token. */
 import {ALLIANCE_CONFIG} from './config.js';
 import {icon} from './icons.js';
-import {localizeOfficerTree,officerLanguage,officerLocale,translateOfficerText,officerStatusLabel} from './native-admin-i18n.js';
+import {localizeOfficerTree,officerLanguage,officerLocale,translateOfficerText} from './native-admin-i18n.js';
 import {buildOfficerActions} from './officer-cockpit.js';
 import {createStatEvidenceViewer} from './native-stat-evidence.js';
-import {renderEvidenceRow,bindEvidenceDialog} from './native-evidence-row.js';
-import {renderVsOverview,derivedVsWeekTotal} from './native-vs-overview.js';
+import {renderEvidenceRow} from './native-evidence-row.js';
+import {renderVsOverview,derivedVsWeekTotal,enrichVsWeeks} from './native-vs-overview.js';
 import {createDuelLeagueController} from './native-duel-league.js';
 import {duelCopy} from './native-duel-league-i18n.js';
 import {diceHistory} from './dice-winners.js';
@@ -15,81 +15,35 @@ const apiBase=ALLIANCE_CONFIG.commandCenterEmbedUrl.replace('/?embed=1','');
 const e=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;','\'':'&#39;'}[c]));
 let sessionToken='',officer=null,panel='overview',cache={},pageLimit=20,historyLimit=20,activityLimit=30,registryFilter='all',activityCategory='all',activityGroupBy='type';
 let sessionGeneration=0;
-const officerReads=new Map();
-let d1BlockedUntil=0;
-const reusableRead=/^\/api\/(overview|officer-alerts|operations|train-manager|train-dice|members|vs-intelligence|donations-intelligence)(\?|$)/;
-function invalidateOfficerReads(){officerReads.clear()}
-function d1LimitError(){return Object.assign(Error('Das tägliche Datenbank-Leselimit ist erreicht. Neue Daten sind nach dem nächsten Reset um 00:00 UTC verfügbar.'),{status:503,code:'D1_READ_LIMIT'})}
-function noteD1Limit(result){
- if(result?.code!=='D1_READ_LIMIT'&&!/D1.*(?:daily.*(?:row read|rows read)|operation limit.*5000000)|daily row read limit/i.test(result?.error||''))return false;
- const now=Date.now();d1BlockedUntil=Date.UTC(new Date(now).getUTCFullYear(),new Date(now).getUTCMonth(),new Date(now).getUTCDate()+1);
- invalidateOfficerReads();return true;
-}
 let duelLeagueController=null;
 let trainHistoryFilters={member:'',date:''},trainHistoryExpanded=false;
-let navigationTrail=[],navigationGroup=null,profileReturn=null,memberFilter='all',vsDialogRelease=null;
-function rememberView(mount,trigger){
- return {node:mount.firstElementChild,panel,cache:{...cache},group:navigationGroup,trigger,
-  scrollY:mount.ownerDocument.defaultView?.scrollY||0,
-  limits:[pageLimit,historyLimit,activityLimit],registryFilter,activityCategory,activityGroupBy,memberFilter};
-}
-function returnFocus(mount,entry){
- if(entry.trigger?.isConnected)entry.trigger.focus({preventScroll:true});
- const win=mount.ownerDocument.defaultView;
- if(win&&win.scrollY!==entry.scrollY)win.scrollTo({top:entry.scrollY,behavior:'auto'});
-}
-function restoreView(mount,entry){
- statViewer.close();clearReviewImages();duelLeagueController?.destroy();duelLeagueController=null;
- panel=entry.panel;cache=entry.cache;navigationGroup=entry.group;
- if(entry.trail)navigationTrail=entry.trail;
- [pageLimit,historyLimit,activityLimit]=entry.limits;
- registryFilter=entry.registryFilter;activityCategory=entry.activityCategory;activityGroupBy=entry.activityGroupBy;
- memberFilter=entry.memberFilter;
- mount.replaceChildren(entry.node);localizeOfficerTree(mount);returnFocus(mount,entry);
-}
-export function clearOfficer(){sessionGeneration++;invalidateOfficerReads();statViewer.close();clearReviewImages();duelLeagueController?.destroy();duelLeagueController=null;sessionToken='';officer=null;cache={};panel='overview';navigationTrail=[];navigationGroup=null;profileReturn=null;memberFilter='all';pageLimit=20;historyLimit=20;trainHistoryFilters={member:'',date:''};trainHistoryExpanded=false;activityLimit=30;registryFilter='all';activityCategory='all';activityGroupBy='type';}
+export function clearOfficer(){clearSourceImages();sessionGeneration++;statViewer.close();clearReviewImages();duelLeagueController?.destroy();duelLeagueController=null;sessionToken='';officer=null;cache={};panel='overview';pageLimit=20;historyLimit=20;trainHistoryFilters={member:'',date:''};trainHistoryExpanded=false;activityLimit=30;registryFilter='all';activityCategory='all';activityGroupBy='type';}
 export const hasOfficer=()=>Boolean(sessionToken);
 const canManageSite=()=>officer?.role==='R5'||(officer?.role==='R4'&&officer?.siteOwner===true);
 async function request(path,options={}){
- if(Date.now()<d1BlockedUntil)throw d1LimitError();
- const method=options.method||'GET',reusable=method==='GET'&&reusableRead.test(path);
- if(method!=='GET')invalidateOfficerReads();
- const previous=officerReads.get(path);
- if(reusable&&previous&&previous.until>Date.now())return structuredClone(await previous.promise);
- const entry={until:Date.now()+60000};
- const run=async()=>{
  const generation=sessionGeneration;
  const headers={'Accept':'application/json',...(options.body?{'Content-Type':'application/json'}:{}),...(sessionToken?{'Authorization':'Bearer '+sessionToken}:{})};
- const response=await fetch(apiBase+path,{method,headers,body:options.body?JSON.stringify(options.body):undefined,mode:'cors',credentials:'omit',cache:'no-store'});
+ const response=await fetch(apiBase+path,{method:options.method||'GET',headers,body:options.body?JSON.stringify(options.body):undefined,mode:'cors',credentials:'omit',cache:'no-store'});
  let result;try{result=await response.json()}catch{throw Error('Die Cloudflare-API antwortet nicht korrekt.')}
- if(!response.ok){if(noteD1Limit(result))throw d1LimitError();if(response.status===401&&path!=='/api/native-login'&&generation===sessionGeneration)clearOfficer();throw Object.assign(Error(result.error||'HTTP '+response.status),{status:response.status})}
- if(method!=='GET')invalidateOfficerReads();
+ if(!response.ok){if(response.status===401&&path!=='/api/native-login'&&generation===sessionGeneration)clearOfficer();throw Object.assign(Error(result.error||'HTTP '+response.status),{status:response.status})}
  return result;
- };
- if(!reusable)return run();
- entry.promise=run();officerReads.set(path,entry);
- try{return structuredClone(await entry.promise)}catch(error){if(officerReads.get(path)===entry)officerReads.delete(path);throw error}
 }
-async function binaryRequest(path,{method='GET',body,headers={}}={}){
- if(Date.now()<d1BlockedUntil)throw d1LimitError();
- if(method!=='GET')invalidateOfficerReads();
+async function binaryRequest(path,{method='GET',body,headers={},raw=false}={}){
  const generation=sessionGeneration;
  const response=await fetch(apiBase+path,{method,headers:{'Accept':method==='GET'?'image/*':'application/json',...(sessionToken?{'Authorization':'Bearer '+sessionToken}:{}),...headers},body,mode:'cors',credentials:'omit',cache:'no-store'});
  if(!response.ok){
   let message='HTTP '+response.status;
-  let result;try{result=await response.clone().json();message=result.error||message}catch{}
-  if(noteD1Limit(result))throw d1LimitError();
+  try{const result=await response.clone().json();message=result.error||message}catch{}
   if(response.status===401&&generation===sessionGeneration)clearOfficer();
   throw Object.assign(Error(message),{status:response.status});
  }
- if(method!=='GET')invalidateOfficerReads();
- return method==='GET'?response.blob():response.json();
+ return raw?response:method==='GET'?response.blob():response.json();
 }
 const statViewer=createStatEvidenceViewer({request,getToken:()=>sessionToken,apiBase});
 const statEvidenceKey=(snapshot,member,metric)=>snapshot&&member&&['power','kills','donations_weekly'].includes(metric)?String(snapshot)+'|'+member+'|'+metric:'';
-const statValueButton=(value,snapshot,member,metric,memberName='')=>{
+const statValueButton=(value,snapshot,member,metric)=>{
  const key=statEvidenceKey(snapshot,member,metric);
- return key?'<button type="button" class="native-stat-value-link" data-native-stat-evidence="'+e(key)+'" data-native-stat-member-name="'+e(memberName)+'" title="Originalbild zum Spielerwert ansehen">'+numberText(value)+' <small aria-hidden="true">↗</small></button>':numberText(value);
+ return key?'<button type="button" class="native-stat-value-link" data-native-stat-evidence="'+e(key)+'" title="Originalbild zum Spielerwert ansehen">'+numberText(value)+' <small aria-hidden="true">↗</small></button>':numberText(value);
 };
 const options=(members,value='')=>'<option value="">Nicht besetzt</option>'+members.map(m=>'<option value="'+e(m.id)+'" '+(m.id===value?'selected':'')+'>'+e(m.name)+' · '+e(m.rank)+'</option>').join('');
 // Keep existing feature panel IDs and API workflows; the fifth main tab is a dedicated tile-based More page.
@@ -98,12 +52,13 @@ const primaryPanels=[
  ['members','Allianz','alliance'],['train','Einsätze','hero']
 ];
 const secondaryPanels=[
+ ['lwImport','LW Import'],
  ['registry','Ränge & Archiv'],['watch','Mitglieder-Abgleich'],['diplomacy','Diplomatie'],
  ['reviews','OCR-Prüffälle'],['tasks','Admin-Aufgaben'],['absences','Abwesenheiten'],['events','Allianz-Events'],
  ['activity','Änderungsprotokoll'],['access','Zugangscodes'],['requirements','Einstellungen']
 ];
-const parentPanel=key=>(key===panel&&navigationGroup)||({
- overview:'overview',vs:'vs',duelLeague:'vs',donations:'vs',members:'members',train:'train',more:'more',
+const parentPanel=key=>({
+ overview:'overview',vs:'vs',duelLeague:'vs',donations:'vs',members:'members',lwImport:'members',train:'train',more:'more',
  registry:'more',watch:'more',diplomacy:'more',reviews:'more',tasks:'more',
  absences:'more',events:'more',activity:'more',access:'more',requirements:'more'
 }[key]||'overview');
@@ -124,7 +79,7 @@ const moreSections=[
 ];
 const sectionPanels={
  vs:[['vs','VS-Duell'],['duelLeague','Duell & Liga'],['donations','Allianzspenden']],
- members:[['members','Mitglieder'],['diplomacy','Diplomatie']],
+ members:[['members','Mitglieder'],['diplomacy','Diplomatie'],['lwImport','LW Import']],
  train:[['train','Züge'],['events','Allianz-Events']]
 };
 const contextTools={
@@ -159,24 +114,17 @@ function moreHub(){
 }
 function cards(items){return '<div class="native-cards">'+items.map(([name,value,sub])=>'<article><small>'+e(name)+'</small><strong>'+e(value)+'</strong><span>'+e(sub||'')+'</span></article>').join('')+'</div>'}
 function marker(status){return '<span class="native-status">'+e(status||'Unbekannt')+'</span>'}
-function reportContext(source={},language='de'){
- const tr=value=>e(translateOfficerText(value,language));
- const state=source.state?officerStatusLabel(source.state,language):tr(source.is_complete===true?'Vollständig':'Unbekannt');
- return '<small class="native-report-context" data-native-report-context><span>'+tr('Woche')+'</span> <b>'+e(source.week||translateOfficerText('Unbekannt',language))+'</b> · '+
-  '<span>'+tr('Datenstand')+'</span>: '+state+' · '+
-  (source.captured_at?e(formatOfficerTime(source.captured_at)):tr('Aufnahmezeit unbekannt'))+'</small>';
-}
 async function view(mount){
- statViewer.close();
+ clearSourceImages();
  clearReviewImages();
  duelLeagueController?.destroy();duelLeagueController=null;
-
+ 
  const header='<div class="native-officer-strip" role="group" aria-label="Offiziersbereich">'+
   '<a class="native-return-link" href="#today">← Zur Website</a>'+
   '<div class="native-officer-controls"><span class="native-officer-badge">'+e(officer?.role||'Offizier')+' · '+e(officer?.name||'')+(officer?.siteOwner?' · Website-Eigentümerin':'')+
-  '</span><details class="native-account-menu"><summary>Mein Zugang</summary><div><button type="button" data-native-refresh>Aktualisieren</button><button type="button" data-officer-tab="access">Offizierszugänge</button><button type="button" data-officer-logout>Abmelden</button></div></details></div></div>';
+  '</span><button type="button" data-officer-tab="access">Mein Zugang</button><button type="button" data-officer-logout>Abmelden</button></div></div>';
  mount.innerHTML='<section class="native-admin"><h1 class="sr-only">RZSN Command Center</h1>'+header+nav(mount.ownerDocument)+
-  (navigationTrail.length?'<div class="native-hub-return"><button type="button" data-native-nav-back '+(navigationTrail.at(-1).panel==='more'?'data-officer-tab="more"':'')+'>← <span>Zurück</span></button><span>'+e(secondaryPanels.find(([key])=>key===panel)?.[1]||'Verwaltung')+'</span></div>':'')+
+  (parentPanel(panel)==='more'&&panel!=='more'?'<div class="native-hub-return"><button type="button" data-officer-tab="more">← Weitere Verwaltung</button><span>'+e(secondaryPanels.find(([key])=>key===panel)?.[1]||'Verwaltung')+'</span></div>':'')+
   '<div class="native-admin-content" id="native-admin-content"><p>Daten werden geladen …</p></div></section>';
  const target=mount.querySelector('#native-admin-content');
  try{
@@ -195,7 +143,7 @@ async function view(mount){
     .sort((a,b)=>a.event_date.localeCompare(b.event_date))[0];
    const eventNames={marshall_guard:'Marshall Guard',zombie_siege:'Zombie Siege',desert_storm:'Desert Storm'};
    const trainLine=slot=>slot?(slot.entry?.driver
-    ? e(slot.entry.driver)+' · '+e(officerStatusLabel(slot.entry.status,officerLanguage(target.ownerDocument)))
+    ? e(slot.entry.driver)+' · '+e(slot.entry.status||'Unbestätigt')
     : 'Fahrer noch nicht eingetragen'):'Kein Eintrag im Wochenplan';
    const actions=buildOfficerActions({today:day,summary,operations:ops,trains,alerts,vs:cache.vs,donations:cache.donations});
    const enUi=officerLanguage(target.ownerDocument)!=='de';
@@ -212,9 +160,9 @@ async function view(mount){
    const urgent=actions.filter(item=>!['train-today','vs-open','donations-open'].includes(item.action)).slice(0,2);
    const actionPill=(key,label,count)=>'<button type="button" class="native-dashboard-quick-link" data-native-action="'+key+'">'+
      e(label)+(count!==undefined?'<b>'+e(count)+'</b>':'')+'</button>';
-   const summaryTile=(key,label,value,sub,shade,source)=>'<button type="button" class="native-dashboard-mini-tile '+shade+
+   const summaryTile=(key,label,value,sub,shade)=>'<button type="button" class="native-dashboard-mini-tile '+shade+
     '" data-native-action="'+key+'"><span>'+e(label)+'</span><strong>'+e(value)+'</strong>'+
-    '<small>'+e(sub)+'</small>'+reportContext(source,officerLanguage(target.ownerDocument))+'<span class="native-dashboard-tile-chevron" aria-hidden="true">›</span></button>';
+    '<small>'+e(sub)+'</small><span class="native-dashboard-tile-chevron" aria-hidden="true">›</span></button>';
    target.innerHTML='<div class="native-dashboard native-dashboard-v39">'+
     '<header class="native-command-header"><div><h2>'+word('Heute','Today')+'</h2>'+
       '<p>'+e(dateText)+'</p></div>'+
@@ -235,16 +183,14 @@ async function view(mount){
       '<b>'+e(nextEvent.event_date)+' · '+e(eventNames[nextEvent.event_type]||nextEvent.event_type||'Event')+'</b></div>':'')+
      (urgent.length?'<div class="native-command-alerts" aria-label="'+word('Offene Hinweise','Open alerts')+'">'+
        urgent.map(item=>'<button type="button" data-native-action="'+e(item.action)+'">'+
-        '<span>'+e(item.title)+'</span><small>'+e(item.detail)+'</small>'+
-        (item.action==='review-open'?'<small class="native-report-context"><span>Alle Berichtswochen</span> · <span>Abgerufen</span>: '+e(formatOfficerTime(new Date().toISOString()))+'</small>':'')+
-        '<b aria-hidden="true">›</b></button>').join('')+
+        '<span>'+e(item.title)+'</span><small>'+e(item.detail)+'</small><b aria-hidden="true">›</b></button>').join('')+
        '</div>':'')+
     '</section>'+
     '<section class="native-dashboard-signal-tiles" aria-label="'+word('Datenstatus','Data status')+'">'+
      summaryTile('vs-open',word('VS-Duell','Alliance Duel'),
-      vsAlert===null?'—':vsAlert,word('Spieler wiederholt unter Ziel','Members below target repeatedly'),'vs',alerts?.vs)+
+      vsAlert===null?'—':vsAlert,word('Spieler wiederholt unter Ziel','Members below target repeatedly'),'vs')+
      summaryTile('donations-open',word('Spenden','Donations'),
-      donationAlert===null?'—':donationAlert,word('Bestätigt unter Wochenziel','Confirmed below weekly goal'),'donations',alerts?.donations)+
+      donationAlert===null?'—':donationAlert,word('Bestätigt unter Wochenziel','Confirmed below weekly goal'),'donations')+
     '</section>'+
     renderImpactWarnings(ops.warnings||[],officerLanguage(target.ownerDocument))+
     (pending.length?'<section class="native-command-tasks"><div class="native-command-section-label"><strong>'+
@@ -282,7 +228,7 @@ async function view(mount){
     [cache.registry,cache.archivedTrains]=await Promise.all([request('/api/member-registry'),request('/api/train-manager').catch(()=>null)]);
     await formerArchiveFromTrain(cache.archivedTrains,cache.registry.members);
    const historicalArchive=historicalFormerRegistryEntries(cache.archivedTrains?.archivedFormerTrainDrivers||[],cache.registry.members);
-   target.innerHTML='<div class="native-row"><h2>Mitgliederverwaltung</h2><button type="button" data-native-member-create>+ Mitglied anlegen</button><input id="registry-search" type="search" aria-label="Spieler suchen" placeholder="Spieler suchen"></div>'+
+   target.innerHTML='<div class="native-row"><h2>Mitgliederverwaltung</h2><button type="button" data-native-member-create>+ Mitglied anlegen</button><input id="registry-search" type="search" placeholder="Spieler suchen"></div>'+
     '<nav class="native-status-filter" aria-label="Mitgliederstatus">'+[['all','Alle'],['active','Aktiv'],['former','Archiv'],['blacklist','Blacklist']].map(([key,label])=>
     '<button type="button" data-native-registry-filter="'+key+'" aria-pressed="'+(registryFilter===key?'true':'false')+'">'+label+'</button>').join('')+'</nav>'+
     cards([['Aktiv',cache.registry.counts.active],['Archiv',Number(cache.registry.counts.former||0)+historicalArchive.length],['Blacklist',cache.registry.counts.blacklisted]])+
@@ -303,6 +249,8 @@ async function view(mount){
     const newButton=target.querySelector('[data-native-diplomacy-new]');if(newButton)newButton.disabled=true;
     target.querySelector('#native-diplomacy-list').innerHTML='<p class="native-evidence-note" role="status">Das private Diplomatiebuch ist vorbereitet, aber auf Cloudflare-Staging noch nicht aktiviert. Es wurden keine Bündnisse oder Zusagen gespeichert.</p>';
    }
+  }else if(panel==='lwImport'){
+   await initLwImport(target);
   }else if(panel==='activity'){
    cache.activity=await request('/api/activity?limit=500');
    target.innerHTML='<div class="native-audit-head"><div><span class="native-kicker">ALLIANZ · VERWALTUNG</span><h2>Admin-Protokoll</h2><p>Nachvollziehbare Änderungen durch Offiziere</p></div>'+icon('tasks','native-audit-title-icon')+'</div>'+
@@ -310,7 +258,7 @@ async function view(mount){
   }else if(panel==='reviews'){
    const [cases,members,session]=await Promise.all([
     request('/api/reviews?status=open'),
-    request('/api/identity-options').catch(()=>[]),
+    request('/api/identity-options?include_former=1').catch(()=>[]),
     request('/api/session').catch(()=>({reviewWritesEnabled:false}))
    ]);
    cache.reviewWritesEnabled=session?.reviewWritesEnabled===true;
@@ -327,26 +275,25 @@ async function view(mount){
     (!cache.reviewWritesEnabled?'<p class="native-evidence-note" role="status">Private Bild- und Korrekturfunktionen werden erst nach dem Cloudflare-Backend-Update freigeschaltet. Die bestehenden Prüffälle bleiben offen.</p>':'')+
     '<details class="native-fold native-review-filter-fold"><summary>Filter</summary><div class="native-fold-body native-row"><label>Bildstatus <select id="review-image-native"><option value="all">Alle Fälle ('+cache.reviews.length+')</option><option value="with">Mit Bild ('+withEvidence+')</option><option value="without">Ohne Bild ('+withoutEvidence+')</option></select></label>'+
      '<label>Quelle <select id="review-batch-native"><option value="">Alle Wochen und Profile</option>'+batches.map(b=>'<option value="'+e(b)+'">'+e(b)+'</option>').join('')+'</select></label>'+
-    '<label>Prüftyp <select id="review-kind-native"><option value="">Alle</option><option value="vs_day">VS-Tageswert</option><option value="identity">Identität</option><option value="profile">Profilwert</option></select></label></div></details>'+
+     '<label>Prüftyp <select id="review-kind-native"><option value="">Alle</option><option value="lw_import">LW Import</option><option value="vs_day">VS-Tageswert</option><option value="identity">Identität</option><option value="profile">Profilwert</option></select></label></div></details>'+
     '<p id="native-review-finished" role="status" aria-live="polite"></p><div id="review-list-native"></div>';renderReviews(target,'');
+   const sources=mount.ownerDocument.createElement('section');sources.id='native-source-reviews';target.append(sources);
+   initSourceReviews(sources);
+   const pending=mount.ownerDocument.createElement('section');target.prepend(pending);void initPendingReviews(pending);
   }else if(panel==='members'){
-    const [list,trains,registry]=await Promise.all([request('/api/members'),request('/api/train-manager').catch(()=>null),request('/api/member-registry').catch(()=>null)]);
-    const knownIds=new Set(list.map(member=>member.id));
-    const former=(registry?.members||[]).filter(member=>member.lifecycle==='former'&&!knownIds.has(member.id))
-     .map(member=>({...member,status:'former'}));
-    cache.members=[...list,...former];cache.archivedTrains=trains;
-    cache.membersArchive=await formerArchiveFromTrain(trains,cache.members);
+    const [list,trains]=await Promise.all([request('/api/members'),request('/api/train-manager').catch(()=>null)]);
+    cache.members=list;cache.archivedTrains=trains;
+    cache.membersArchive=await formerArchiveFromTrain(trains,list);
     cache.membersArchiveAvailable=Boolean(trains);
-   target.innerHTML='<div class="native-row native-member-toolbar"><h2>Allianzmitglieder</h2><input id="native-member-search" type="search" aria-label="Spieler suchen" placeholder="Spieler suchen" autocomplete="off">'+
-    '<label>Status<select id="native-member-filter">'+[['all','Alle'],['active','Aktiv'],['former','Archiv']].map(([value,label])=>'<option value="'+value+'" '+(memberFilter===value?'selected':'')+'>'+label+'</option>').join('')+'</select></label></div>'+
-    '<p class="native-muted">Nach Rang sortiert. Spieler antippen: Profil, Messwerte, Wochenverlauf, Erfolge und Zug-Historie.</p><div id="native-member-list"></div>';
+   target.innerHTML='<div class="native-row"><h2>Allianzmitglieder</h2><input id="native-member-search" type="search" placeholder="Spieler suchen" autocomplete="off"></div>'+
+    '<p class="native-muted">Nach Rang sortiert. Spieler antippen: Profil, Messwerte, Wochenverlauf, Erfolge und Zug-Historie.</p><p class="native-muted">'+(officerLanguage(target.ownerDocument)==='de'?'Spieler öffnen → LW Import.':'Open player → LW Import.')+'</p><div id="native-member-list"></div>';
    renderMembers(target,'');
   }else if(panel==='vs'){
    const [data,summary]=await Promise.all([request('/api/vs-intelligence'),request('/api/overview')]);
-   cache.vs=data;cache.overview=summary;
+   cache.vs=enrichVsWeeks(data);cache.overview=summary;
    target.innerHTML='<div class="native-vs-week-toolbar"><label>'+(officerLanguage(target.ownerDocument)==='de'?'Woche':'Week')+
-    ' <select id="native-vs-week">'+data.weeks.map(w=>'<option value="'+e(w.week)+'" '+(w.week===cache.vsView?.week?'selected':'')+'>'+e(w.week)+'</option>').join('')+'</select></label><input type="search" id="native-vs-search" aria-label="Spieler suchen" placeholder="Spieler suchen" autocomplete="off"></div>'+
-    '<div id="native-vs-body"></div>';renderVs(target);
+    ' <select id="native-vs-week">'+data.weeks.map(w=>'<option value="'+e(w.week)+'">'+e(w.week)+'</option>').join('')+'</select></label></div>'+
+    '<input type="search" id="native-vs-search" aria-label="Spieler suchen" placeholder="Spieler suchen" autocomplete="off"><div id="native-vs-body"></div>';renderVs(target);
   }else if(panel==='duelLeague'){
    target.innerHTML='<div id="native-duel-league-root"></div>';
    const root=target.querySelector('#native-duel-league-root');
@@ -407,10 +354,9 @@ function renderMembers(target,query=''){
  const records=Array.isArray(cache.members)?cache.members:[];
  const text=String(query).trim().toLocaleLowerCase('de-DE');
  const isFormer=m=>['former','archived','inactive'].includes(String(m.lifecycle||m.status||'').toLowerCase());
- const list=records.filter(m=>String(m.name||'').toLocaleLowerCase('de-DE').includes(text)&&
-  (memberFilter==='all'||(memberFilter==='former'?isFormer(m):!isFormer(m))));
+ const list=records.filter(m=>String(m.name||'').toLocaleLowerCase('de-DE').includes(text));
  const active=list.filter(m=>!isFormer(m)),realFormer=list.filter(isFormer);
- const historical=memberFilter==='active'?[]:(cache.membersArchive||[]).filter(x=>String(x.name).toLocaleLowerCase('de-DE').includes(text));
+ const historical=(cache.membersArchive||[]).filter(x=>String(x.name).toLocaleLowerCase('de-DE').includes(text));
  const opened=new Set([...host.querySelectorAll('details.native-rank-group[open]')].map(x=>x.dataset.rank));
  const initial=!host.querySelector('.native-rank-group');
  const firstRank=rankOrder.find(rank=>active.some(m=>(rankOrder.includes(m.rank)?m.rank:'Ungeklärt')===rank));
@@ -473,6 +419,343 @@ async function loadMemberAliases(details,id){
   if(details.isConnected&&details.dataset.nativeAliasRequest===requestId)details.querySelector('[data-native-alias-status]').textContent='Frühere Spielernamen konnten nicht geladen werden. Bitte Profil neu öffnen.';
  }
 }
+const lwMetrics=[['power','Power'],['drone','Drone'],['kills','Kills'],['hq','HQ'],['vs_results','VS-Ergebnisse'],['donations_weekly','Wochenspenden']];
+const lwValue=value=>Number.isSafeInteger(value)?numberText(value):'nicht erfasst';
+const lwCardValue=value=>Number.isSafeInteger(value)?new Intl.NumberFormat('de-DE',{notation:'compact',maximumFractionDigits:2}).format(value):'nicht erfasst';
+// Sunday rows are scoped by /api/member/:id; reject explicit foreign IDs as well.
+// Calendar dates stay date-only: an LW report has no measured time of day.
+export function buildUnifiedMetricTimeline(data,memberId,metric,sundayStats=[],weeks=[],days=[]){
+ const candidates=[];
+ if(metric==='vs_results')return weeks.filter(w=>/^20\d{2}-W\d{2}$/.test(w.week)).map(w=>{
+  const rows=days.filter(d=>d.week===w.week&&(d.member_id==null||d.member_id===memberId)&&Number.isInteger(Number(d.weekday))&&Number(d.weekday)>=0&&Number(d.weekday)<6);
+  const total=derivedVsWeekTotal(rows.map(d=>['observed','corrected'].includes(d.quality)?d:{...d,verified:false}));
+  const value=w.state==='final'&&total.complete?total.total:null;
+  return {report_date:w.week,value,values:{[metric]:value},source:'VS · '+(value===null?'Vorläufig / unvollständig':'Final'),quality:'observed',sources:[],vsDays:rows};
+ }).sort((a,b)=>a.report_date.localeCompare(b.report_date));
+ for(const row of Array.isArray(sundayStats)?sundayStats:[]){
+  if(!['power','kills','donations_weekly'].includes(metric)||row.metric!==metric||(row.member_id!=null&&row.member_id!==memberId))continue;
+  if(!['observed','corrected'].includes(row.quality))continue;
+  const value=Number.isSafeInteger(row.value)&&row.value>=0?row.value:null;
+  if(metric!=='donations_weekly'&&value===null)continue;
+  candidates.push({...row,value,report_date:metric==='donations_weekly'?row.week:String(row.captured_at||'').slice(0,10),source:'Sonntagsprofil',priority:row.quality==='corrected'?3:2});
+ }
+ for(const row of metric==='donations_weekly'?[]:data?.snapshots||[]){
+  if(row.member_id!==memberId||!row.applied_at)continue;
+  const value=row.values?.[metric];
+  candidates.push({...row,value:Number.isSafeInteger(value)&&value>=0?value:null,source:'LW Import',quality:'applied',priority:1});
+ }
+ const dates=new Map();
+ for(const row of candidates){
+  if(!(metric==='donations_weekly'?/^20\d{2}-W\d{2}$/:/^\d{4}-\d{2}-\d{2}$/).test(row.report_date))continue;
+  if(!dates.has(row.report_date))dates.set(row.report_date,[]);
+  dates.get(row.report_date).push(row);
+ }
+ return [...dates].sort(([a],[b])=>a.localeCompare(b)).map(([date,sources])=>{
+  // Valid corrected Sunday > observed Sunday > applied LW. Never average cumulative values.
+  sources.sort((a,b)=>Number(Number.isSafeInteger(b.value))-Number(Number.isSafeInteger(a.value))||b.priority-a.priority||String(b.captured_at||b.applied_at).localeCompare(String(a.captured_at||a.applied_at)));
+  const chosen=sources[0];
+  return {...chosen,report_date:date,values:{[metric]:chosen.value},sources,discrepancy:new Set(sources.filter(s=>Number.isSafeInteger(s.value)).map(s=>s.value)).size>1};
+ });
+}
+function unifiedPointEvidence(point,memberId,metric){
+ if(metric==='vs_results')return point.vsDays.map(d=>'<button type="button" data-native-vs-image="'+e(point.report_date+'|'+memberId+'|'+d.weekday)+'">'+e(['Mo','Di','Mi','Do','Fr','Sa'][d.weekday]||'?')+' / Beleg</button>').join('');
+ const sourceText=s=>s.source+' · '+(metricQuality[s.quality]||'Übernommen')+' · '+(s.captured_at||s.report_date);
+ return '<small>'+e(sourceText(point))+'</small>'+(point.discrepancy?'<strong role="note">Abweichende Quellenwerte · Quellenpriorität angewendet</strong>':'')+
+  '<details><summary>Messwerte &amp; Belege · '+point.sources.length+'</summary>'+point.sources.map(s=>'<p>'+e(sourceText(s))+' · '+(s.source==='Sonntagsprofil'?statValueButton(s.value,s.snapshot_id,memberId,metric):lwValue(s.value))+(s.source==='LW Import'?'<br>'+e('Batch '+s.batch_id+' · Quellzeile '+s.source_row+' · SHA256 '+s.sha256+' · Übernommen: '+s.applied_at):'')+'</p>').join('')+'</details>';
+}
+/* Hallmark · pre-emit critique: P4 H4 E4 S5 R5 V4. Existing Luna tokens and profile hierarchy. */
+export function renderLwProfile(data,memberId,metric='power',range='5',sundayStats=[],weeks=[],days=[]){
+ const snapshots=(data?.snapshots||[]).filter(s=>s.member_id===memberId&&s.applied_at).slice().sort((a,b)=>a.report_date.localeCompare(b.report_date)||a.applied_at.localeCompare(b.applied_at));
+ const timelines=Object.fromEntries(lwMetrics.map(([key])=>[key,buildUnifiedMetricTimeline(data,memberId,key,sundayStats,weeks,days)]));
+ const latest=snapshots.at(-1);
+ const selected=timelines[metric]||timelines.power;
+ const prior=selected.at(-2),first=selected[0];
+ if(!['1','4','5','all'].includes(String(range)))range='5';
+ if(!lwMetrics.some(([key])=>key===metric))metric='power';
+ const title=lwMetrics.find(([key])=>key===metric)[1];
+ const change=(key,base=timelines[key].at(-2))=>{
+  const current=timelines[key].at(-1);
+  const a=current?.values?.[key],b=base?.values?.[key];
+  if(!base||base===current||current.report_date===base.report_date)return 'Noch kein Vergleich';
+  if(!Number.isSafeInteger(a)||!Number.isSafeInteger(b))return 'Vergleich nicht erfasst';
+  const delta=a-b,percent=b===0?'n/a (Basis 0)':(delta>0?'+':'')+new Intl.NumberFormat('de-DE',{maximumFractionDigits:2}).format(delta/b*100)+' %';
+  return (delta<0?'Rückgang · ':delta>0?'+':'')+numberText(delta)+' / '+percent+' seit '+base.report_date;
+ };
+ let html='<section class="native-lw-profile" aria-label="Werte und Entwicklung"><h4 class="native-section-heading">Werte &amp; Entwicklung</h4><p class="native-muted" data-native-no-translate>member_id: '+e(memberId)+'</p>';
+ if(!latest)html+='<p>Noch keine LW-Werte freigegeben. LW-exklusive Werte sind nicht erfasst.</p><button type="button" data-officer-tab="lwImport">LW Import \u00f6ffnen</button>';
+ html+='<p>'+snapshots.length+' \u00fcbernommene Updates \u00b7 Sonntagsprofil &amp; LW Import</p><p>Berichtsdatum, kein belegtes Messzeitende f\u00fcr LW Import; Sonntagsprofil mit Aufnahmezeit.</p><div class="native-lw-kpis">'+lwMetrics.map(([key,label])=>{
+  const current=timelines[key].at(-1),previous=timelines[key].at(-2);
+  return '<button type="button" class="native-profile-metric-card" data-lw-kpi="'+key+'" aria-pressed="'+(metric===key)+'"><small>'+label+'</small><strong title="'+lwValue(current?.value)+'">'+lwCardValue(current?.value)+'</strong><span>'+e(change(key))+'</span><small>Vorwert: '+lwValue(previous?.value)+(previous?' / '+e(previous.report_date):'')+'</small><small>Stand: '+e(current?.report_date||'nicht erfasst')+' \u00b7 '+e(current?current.source+' \u00b7 '+(metricQuality[current.quality]||'\u00dcbernommen'):key==='donations_weekly'?'Sonntagsprofil erforderlich':key==='vs_results'?'Keine finalen VS-Werte':'LW Import erforderlich')+'</small></button>';
+ }).join('')+'</div>';
+ const reports=timelines[metric];
+ const points=range==='all'?reports:reports.slice(-Number(range)),known=points.map(p=>p.values[metric]).filter(Number.isSafeInteger);
+ const min=known.length?Math.min(...known):null,max=known.length?Math.max(...known):null;
+ const x=i=>points.length>1?20+i*560/(points.length-1):300,y=v=>max===min?80:140-(v-min)*120/(max-min);
+ let paths=[],segment=[];
+ points.forEach((p,i)=>{const value=p.values[metric];if(Number.isSafeInteger(value))segment.push(x(i)+','+y(value));else if(segment.length){paths.push(segment);segment=[]}});if(segment.length)paths.push(segment);
+ html+='<div class="native-lw-chart"><div class="native-lw-toolbar"><label>Zeitpunkte <select data-lw-range>'+[['1','1'],['4','4'],['5','5'],['all','Alle']].map(([value,label])=>'<option value="'+value+'" '+(String(range)===value?'selected':'')+'>'+label+'</option>').join('')+'</select></label></div><p>Seit dem ersten Bericht: '+e(change(metric,first))+'</p><h5>'+title+' · Verlauf</h5><p>'+(!known.length?'Messwerte nicht erfasst':points.length<2?'Noch kein Vergleich':prior?.report_date===selected.at(-1)?.report_date?'Berichte am selben Datum · kein zeitliches Delta':'Eigene Skala · '+lwValue(min)+' bis '+lwValue(max))+'</p>'+
+  (metric==='donations_weekly'?'<p>Wöchentliche Allianz-Tech-Spenden / Sonntagsprofil</p>':'')+'<p>'+(['vs_results','donations_weekly'].includes(metric)?'ISO-Woche / kategorische Zeitpunkte':'Berichtsdatum / kategorische Zeitpunkte')+'</p><svg viewBox="0 0 600 190" role="img" aria-label="'+title+' · Werte in der Liste unter dem Diagramm">'+(known.length?'<text x="20" y="12">'+lwValue(max)+'</text><text x="20" y="180">'+lwValue(min)+'</text>':'')+paths.filter(p=>p.length>1).map(p=>'<polyline points="'+p.join(' ')+'"/>').join('')+points.map((p,i)=>Number.isSafeInteger(p.values[metric])?'<circle cx="'+x(i)+'" cy="'+y(p.values[metric])+'" r="4"><title>'+e(p.report_date+' · '+title+': '+lwValue(p.values[metric])+' \u00b7 '+p.source)+'</title></circle>':'').join('')+(points.length?'<text x="20" y="165">'+e(points[0].report_date)+'</text><text x="580" y="165" text-anchor="end">'+e(points.at(-1).report_date)+'</text>':'')+'</svg><ol class="native-lw-points">'+points.map(p=>'<li><time>'+e(p.report_date)+'</time> / '+title+': '+lwValue(p.values[metric])+' '+unifiedPointEvidence(p,memberId,metric)+'</li>').join('')+'</ol></div>';
+ if(!latest)return html+'</section>';
+ html+='<details class="native-fold"><summary>Profil &amp; Allianz</summary><div class="native-fold-body">HQ: '+lwValue(latest.values.hq)+' / VIP: '+lwValue(latest.values.vip)+' · Profession: '+e(latest.values.Profession??'nicht erfasst')+' · Coords: '+e(latest.values.Coords??'nicht erfasst')+'<br>Schild: '+e(latest.values.Shield??'nicht erfasst')+' / Abwesenheit (Quelle): '+e(latest.values['Left / away']??'nicht erfasst')+'</div></details>';
+ html+='<details class="native-fold"><summary>Teams T1–T4</summary><div class="native-fold-body native-lw-teams">'+[1,2,3,4].map(n=>'<section><h5>T'+n+'</h5><p>Power: '+lwValue(latest.values['t'+n+'_power'])+'</p><p>Type: '+e(latest.values['T'+n+' type']??'nicht erfasst')+'</p><p>Heroes: '+e(latest.values['T'+n+' heroes']??'nicht erfasst')+'</p></section>').join('')+'</div></details>';
+ return html+'<details class="native-fold"><summary>Originalquelle · '+snapshots.length+'</summary><div class="native-fold-body">'+snapshots.slice().reverse().map(p=>'<p data-native-no-translate>LW Import · '+e(p.report_date)+' · member_id '+e(p.member_id)+'<br>Batch '+e(p.batch_id)+' · Quellzeile '+e(p.source_row)+'<br>SHA256 '+e(p.sha256)+'<br>Übernommen: '+e(p.applied_at)+' · Review: '+e(p.resolved_at??'nicht erfasst')+'<br>Reviewer: '+e(p.reviewer??p.reviewed_by??p.resolved_by??p.applied_by??'nicht erfasst')+'</p>').join('')+'</div></details></section>';
+}
+
+export function renderMembershipEvents(events=[]){
+ return '<h4>Mitgliedschaft · Spielereignisse</h4><div class="native-profile-timeline">'+(events.length?events.map(item=>'<p><time>'+e(item.recorded_at)+'</time> · '+e(item.event)+'<br>Vorher: '+e(item.previous)+' · Jetzt: '+e(item.current)+'</p>').join(''):'<p>Keine Mitgliedschaftsereignisse übermittelt.</p>')+'</div>';
+}
+export async function loadMemberActivity(holder,id,fetchHistory=request){
+ holder.textContent='Änderungen werden geladen …';
+ try{
+  const response=await fetchHistory('/api/activity?limit=100&member_id='+encodeURIComponent(id));
+  const history=response.filter(item=>item.member_id==null||item.member_id===id);
+  if(!holder.isConnected)return;
+  holder.innerHTML='<h4>Änderungsprotokoll</h4>'+(history.length?history.map(item=>'<p><b>'+e(item.actor||'Akteur nicht erfasst')+'</b> · '+e(item.action)+' · '+e(formatOfficerTime(item.at))+'</p>').join(''):'<p>Keine Verwaltungsänderungen zu dieser Spieler-ID übermittelt.</p>');
+ }catch{if(holder.isConnected)holder.textContent='Verwaltungsprotokoll konnte nicht geladen werden. Über Änderungen anzeigen erneut versuchen.'}
+}
+
+async function initLwImport(target){
+ target.innerHTML='<section class="native-lw-import"><h2>LW Import</h2><p>CSV-Snapshot prüfen und bestehende member_id zuordnen. Vollständigen aktuellen Mitgliederbestand separat bestätigen.</p>'+
+  '<form data-lw-upload class="native-row"><label>Berichtsdatum<input type="date" name="report_date" required></label><label class="native-lw-file">CSV auswählen<input type="file" name="csv" accept=".csv,text/csv" required></label><button>Vorschau prüfen</button></form>'+
+  '<p data-lw-status role="status" aria-live="polite"></p><div data-lw-batches></div><div data-lw-batch></div></section>';
+ const generation=sessionGeneration,live=()=>target.isConnected&&panel==='lwImport'&&generation===sessionGeneration;
+ const status=target.querySelector('[data-lw-status]'),form=target.querySelector('[data-lw-upload]');
+ const show=batch=>{if(!live())return;renderLwBatch(target.querySelector('[data-lw-batch]'),batch,live)};
+ form.addEventListener('submit',async event=>{
+  event.preventDefault();const file=form.elements.csv.files?.[0];if(!file)return;
+  if(file.size>262144){status.textContent='LW Import: Dateigrenze 256 KiB';return}
+  const date=form.elements.report_date.value,button=form.querySelector('button');button.disabled=true;status.textContent='LW Import wird serverseitig geprüft …';
+  try{
+   const bytes=await file.arrayBuffer();form.elements.csv.value=''; // Do not retain or share the original filename.
+   const batch=await binaryRequest('/api/lw-import?report_date='+encodeURIComponent(date),{method:'POST',body:bytes,headers:{'Content-Type':'text/csv'}});
+   if(!live())return;show(batch);status.textContent=batch.reused?'Vorhandener LW Import-Batch geladen.':'LW Import privat hinterlegt; noch keine Werte übernommen.';
+  }catch(error){if(live())status.textContent=error.message}finally{if(live())button.disabled=false}
+ });
+ try{
+  const result=await request('/api/lw-import');if(!live())return;
+  const host=target.querySelector('[data-lw-batches]');
+  host.innerHTML='<details class="native-fold"><summary>LW Import · Bisherige Batches</summary><div class="native-fold-body">'+result.batches.map(b=>'<button type="button" data-lw-batch-id="'+e(b.id)+'">LW Import · '+e(b.report_date)+' · '+b.row_count+' Zeilen</button>').join('')+'</div></details>';
+  host.addEventListener('click',async event=>{const button=event.target.closest('[data-lw-batch-id]');if(!button)return;button.disabled=true;try{show(await request('/api/lw-import/'+button.dataset.lwBatchId))}catch(error){if(live())status.textContent=error.message}finally{button.disabled=false}});
+ }catch(error){if(live())status.textContent='LW Import: '+error.message}
+}
+export function renderLwGroups(batch){
+ const key=r=>r.applied_at?'applied':r.match_state==='blocked'?'blocked':r.match_state==='matched'?'matched':'unmatched';
+ return [['unmatched','Unmatched / Ungeklärt'],['matched','Matched / Zugeordnet'],['applied','Applied / Übernommen'],['blocked','Blocked / Gesperrt']].map(([group,title])=>{const rows=batch.rows.filter(r=>key(r)===group).sort((a,b)=>a.source_row-b.source_row);return '<details class="native-fold native-lw-group" data-lw-group="'+group+'"><summary>'+title+' <span data-lw-visible>'+rows.length+'</span></summary><div class="native-fold-body">'+(rows.length?rows.map(r=>'<details class="native-fold" data-lw-row="'+r.source_row+'" data-search="'+e((r.source_name+' '+(r.member_id??'')).normalize('NFC').toLocaleLowerCase())+'"><summary>Zeile '+r.source_row+' / <span data-native-no-translate>'+e(r.source_name)+'</span></summary><div class="native-fold-body"><p data-native-no-translate>member_id: '+e(r.member_id??'ungeklärt')+'</p><p>'+e(r.errors.join(' / '))+'</p>'+lwSourceFields(r.source)+(!r.applied_at&&['unmatched','ambiguous'].includes(r.match_state)&&r.review_status==='open'?'<div data-lw-identity></div>':'')+'</div></details>').join(''):'<p>Keine Zeilen in dieser Gruppe.</p>')+'</div></details>'}).join('');
+}
+function renderLwBatch(host,batch,live){
+ const eligible=batch.rows.filter(r=>r.match_state==='matched'&&!r.applied_at);
+ const counts={matched:eligible.length,unmatched:batch.rows.filter(r=>!r.applied_at&&['unmatched','ambiguous'].includes(r.match_state)).length,blocked:batch.rows.filter(r=>!r.applied_at&&r.match_state==='blocked').length,applied:batch.rows.filter(r=>r.applied_at).length};
+ host.innerHTML='<h3>LW Import · '+e(batch.report_date)+'</h3><p data-native-no-translate>Batch '+e(batch.id)+'<br>SHA256 '+e(batch.sha256)+'</p>'+
+  '<p>'+counts.unmatched+' ungekl\u00e4rt / '+counts.matched+' zugeordnet / '+counts.applied+' \u00fcbernommen / '+counts.blocked+' gesperrt</p>'+
+  '<button type="button" data-officer-tab="reviews">Im nativen Review prüfen</button>'+
+  '<button type="button" data-lw-original>LW Import · Original-CSV</button>'+
+  '<details class="native-fold" data-lw-roster><summary>Aktuellen Mitgliederbestand abgleichen</summary><div class="native-fold-body"><p>Nur ein vollständig geprüfter aktueller Mitgliederbestand belegt fehlende Mitglieder. Leistungswerte allein reichen nicht.</p><button type="button" data-lw-roster-load>Geschützte Bestandsvorschau laden</button><div data-lw-roster-preview></div><p data-lw-roster-result role="status" aria-live="polite"></p></div></details>'+
+  '<label>Quellzeilen suchen<input type="search" data-lw-search placeholder="Name oder member_id"></label><label>Status filtern<select data-lw-filter><option value="">Alle Gruppen</option><option value="unmatched">Ungeklärt</option><option value="matched">Zugeordnet</option><option value="applied">Übernommen</option><option value="blocked">Gesperrt</option></select></label><p data-lw-empty hidden role="status">Keine Quellzeilen passen zur Suche.</p><div class="native-lw-rows">'+renderLwGroups(batch)+'</div>'+
+  '<details class="native-fold"><summary>Geprüfte Werte separat übernehmen</summary><form data-lw-apply><p>Nur die ausdrücklich ausgewählten, zugeordneten Zeilen übernehmen. Offene Zuordnungen bleiben im Review.</p><button type="button" data-lw-select-all>Alle zugeordneten Zeilen auswählen</button><button type="button" data-lw-deselect-all>Auswahl aufheben</button><p data-lw-selected role="status" aria-live="polite">0 Zeilen ausgewählt</p><div class="native-lw-selection">'+eligible.map(r=>'<label><input type="checkbox" name="row" value="'+r.source_row+'"> Zeile '+r.source_row+' · '+e(r.source_name)+'</label>').join('')+'</div>'+
+  '<label>R4/R5-Prüfbegründung für die Auswahl<input name="reason" required minlength="8" maxlength="500"></label><label><input type="checkbox" name="reviewed" required> Ausgewählte Quellzeilen und member_id geprüft</label><button '+(!eligible.length?'disabled':'')+'>Geprüfte Zeilen übernehmen</button></form></details><p data-lw-result role="status" aria-live="polite"></p>';
+ const filter=()=>{const term=host.querySelector('[data-lw-search]').value.normalize('NFC').toLocaleLowerCase(),state=host.querySelector('[data-lw-filter]').value;host.querySelectorAll('[data-lw-group]').forEach(group=>{let count=0;group.querySelectorAll('[data-lw-row]').forEach(row=>{row.hidden=!row.dataset.search.includes(term);if(!row.hidden)count++});group.hidden=Boolean(state&&state!==group.dataset.lwGroup)||!count;group.querySelector('[data-lw-visible]').textContent=count});host.querySelector('[data-lw-empty]').hidden=[...host.querySelectorAll('[data-lw-group]')].some(g=>!g.hidden)};
+ host.querySelector('[data-lw-search]').addEventListener('input',filter);host.querySelector('[data-lw-filter]').addEventListener('change',filter);
+ initLwRoster(host,batch,live);
+ let optionsPromise;
+ host.querySelectorAll('[data-lw-row]').forEach(card=>card.addEventListener('toggle',async()=>{
+  const mount=card.querySelector('[data-lw-identity]');if(!card.open||!mount||mount.dataset.loaded)return;mount.dataset.loaded='1';mount.textContent='Mitglieder werden geladen ...';
+  try{const members=await(optionsPromise??=request('/api/identity-options?include_former=1'));if(!live())return;
+   const options={members:(Array.isArray(members)?members:members.members||[]).map(m=>({...m,aliases:m.aliases||[]})),creation:{reason:'Neue Identitäten bleiben offen und müssen separat geprüft werden.'}};
+   const row=batch.rows.find(r=>String(r.source_row)===card.dataset.lwRow);
+   mount.innerHTML='<form data-lw-inline-review><label>Bestehendes Mitglied suchen<input type="search" name="search" autocomplete="off" placeholder="Name, verifizierter Alias oder ID"></label><label>Identität auswählen<select name="member_id" required><option value="">Bitte bewusst auswählen</option>'+options.members.map(m=>'<option value="'+e(m.id)+'">'+e(m.name)+(m.status==='former'?' (Archiv)':'')+' / '+e(m.id)+(m.aliases.length?' / '+e(m.aliases.join(', ')):'')+'</option>').join('')+'</select></label><label>Prüfbegründung<input name="reason" required minlength="8" maxlength="500"></label><p data-native-no-translate>SHA256 '+e(batch.sha256)+'</p><label><input name="checked" type="checkbox" required> Originalzeile, SHA und gewählte Identität geprüft; Zuordnung ausdrücklich bestätigen</label><button>Zuordnung bestätigen</button></form><button type="button" disabled>Neues Mitglied anlegen</button><p>'+e(options.creation.reason)+'</p><p data-lw-identity-result role="status" aria-live="polite"></p>';
+   const form=mount.querySelector('form'),select=form.elements.member_id;
+   select.addEventListener('change',()=>{form.elements.checked.checked=false});
+   form.elements.search.addEventListener('input',()=>{select.value='';form.elements.checked.checked=false;const term=form.elements.search.value.normalize('NFC').toLocaleLowerCase();const matches=options.members.filter(m=>(m.name+' '+m.id+' '+m.aliases.join(' ')).normalize('NFC').toLocaleLowerCase().includes(term));select.innerHTML='<option value="">Bitte bewusst ausw\u00e4hlen</option>'+matches.map(m=>'<option value="'+e(m.id)+'">'+e(m.name)+(m.status==='former'?' (Archiv)':'')+' / '+e(m.id)+(m.aliases.length?' / '+e(m.aliases.join(', ')):'')+'</option>').join('')});
+   form.addEventListener('submit',async event=>{event.preventDefault();const button=form.querySelector('button'),message=mount.querySelector('[data-lw-identity-result]'),memberId=select.value;if(!memberId||!form.elements.checked.checked||form.elements.reason.value.trim().length<8){message.textContent='Identität, Quellprüfung und mindestens acht Zeichen Begründung erforderlich.';return}button.disabled=true;
+    try{const receipt=await request('/api/reviews/'+encodeURIComponent(row.review_id)+'/resolve',{method:'POST',body:{action:'approve',member_id:memberId,reason:form.elements.reason.value,source_checked:true,sha256:batch.sha256}});const reread=await request('/api/lw-import/'+batch.id);if(!live())return;const actual=reread.rows.find(r=>r.source_row===row.source_row);if(!receipt.ok||reread.sha256!==batch.sha256||actual?.member_id!==memberId||actual.match_state!=='matched'||actual.applied_at)throw Error('Zuordnung nicht eindeutig rückbestätigt. Batch neu laden.');renderLwBatch(host,reread,live);host.querySelector('[data-lw-result]').textContent='Zuordnung bestätigt und erneut gelesen. Keine Punkte übernommen.'}catch(error){if(live()){message.textContent=error.message;button.disabled=false}}
+   });
+  }catch(error){if(live()){mount.textContent=error.message;delete mount.dataset.loaded;optionsPromise=null}}
+ }));
+ host.querySelector('[data-lw-original]').addEventListener('click',async event=>{
+  const button=event.currentTarget,message=host.querySelector('[data-lw-result]');button.disabled=true;
+  try{
+   const response=await binaryRequest('/api/lw-import/'+batch.id+'/original',{raw:true,headers:{Accept:'text/csv'}}),bytes=await response.arrayBuffer();
+   const sha=[...new Uint8Array(await crypto.subtle.digest('SHA-256',bytes))].map(n=>n.toString(16).padStart(2,'0')).join('');
+   if(!live())return;if(sha!==batch.sha256)throw Error('LW Import: Original-Prüfsumme stimmt nicht überein');
+   const blobUrl=URL.createObjectURL(new Blob([bytes],{type:'text/csv;charset=utf-8'})),anchor=host.ownerDocument.createElement('a');
+   anchor.href=blobUrl;anchor.download='LW Import.csv';anchor.click();setTimeout(()=>URL.revokeObjectURL(blobUrl),1000);
+   message.textContent='LW Import: Original-Prüfsumme bestätigt.';
+  }catch(error){if(live())message.textContent=error.message}finally{if(live())button.disabled=false}
+ });
+ const applyForm=host.querySelector('[data-lw-apply]');
+ const selectionStatus=()=>{host.querySelector('[data-lw-selected]').textContent=applyForm.querySelectorAll('[name=row]:checked').length+' Zeilen ausgewählt'};
+ for(const [selector,checked] of [['[data-lw-select-all]',true],['[data-lw-deselect-all]',false]]){
+  host.querySelector(selector).addEventListener('click',()=>{applyForm.querySelectorAll('[name=row]').forEach(input=>{input.checked=checked});selectionStatus()});
+ }
+ applyForm.addEventListener('change',selectionStatus);
+ host.querySelector('[data-lw-apply]').addEventListener('submit',async event=>{
+  event.preventDefault();const form=event.target,rows=[...form.querySelectorAll('[name=row]:checked')].map(x=>Number(x.value)),message=host.querySelector('[data-lw-result]');
+  if(!rows.length){message.textContent='Quellzeilen auswählen.';return}
+  const body={rows,sha256:batch.sha256,revision:batch.revision,reason:form.elements.reason.value,reviewed:form.elements.reviewed.checked};
+  if(!form.elements.reviewed.checked||form.elements.reason.value.trim().length<8){message.textContent='Quellprüfung und mindestens acht Zeichen Begründung erforderlich.';return}
+  const button=form.querySelector('button:not([type=button])');button.disabled=true;message.textContent='LW Import: Freigabe und Rücklesekontrolle …';
+  try{
+   const receipt=await request('/api/lw-import/'+batch.id+'/apply',{method:'POST',body});
+   const reread=await request('/api/lw-import/'+batch.id);if(!live())return;
+   if(!receipt.ok||receipt.sha256!==batch.sha256||reread.sha256!==batch.sha256||rows.some(n=>{const expected=batch.rows.find(r=>r.source_row===n),actual=reread.rows.find(r=>r.source_row===n);return !actual?.applied_at||actual.member_id!==expected.member_id}))throw Error('LW Import: Quittung oder Rücklesekontrolle unvollständig. Neu laden.');
+   renderLwBatch(host,reread,live);host.querySelector('[data-lw-result]').textContent='LW Import: '+receipt.applied_rows+' Zeilen bestätigt und erneut gelesen.';
+  }catch(error){if(live()){message.textContent=error.message;button.disabled=false}}
+ });
+}
+function initLwRoster(host,batch,live){
+ if(batch.roster_gate){initCurrentLwRoster(host,batch,live);return}
+ const load=host.querySelector('[data-lw-roster-load]'),mount=host.querySelector('[data-lw-roster-preview]'),message=host.querySelector('[data-lw-roster-result]');
+ const current=()=>live()&&load.isConnected;
+ const path='/api/lw-import/'+batch.id+'/roster-reconcile';
+ const checkRegistry=(registry,receipt)=>{
+  const active=registry.members.filter(m=>m.lifecycle==='active').map(m=>m.id).sort();
+  return registry.counts.active===98&&active.length===98&&JSON.stringify(active)===JSON.stringify([...receipt.active_ids].sort())&&receipt.member_ids.every(id=>registry.members.some(m=>m.id===id&&m.lifecycle==='former'));
+ };
+ const show=preview=>{
+  if(preview.batch_id!==batch.id||preview.sha256!==batch.sha256)throw Error('Bestandsquelle stimmt nicht mit dem geladenen Batch überein.');
+  mount.innerHTML='<p>Aktuell '+e(preview.active_count)+' aktive Mitglieder · Bericht '+e(preview.report_date)+'</p><p data-native-no-translate style="overflow-wrap:anywhere">SHA256 '+e(preview.sha256)+'</p>';
+  if(preview.reconciled){
+   message.textContent='Bestandsabgleich bestätigt und erneut gelesen: '+preview.active_count+' aktive Mitglieder.';
+   if(preview.manual_creation_enabled&&preview.active_count===98&&preview.unmatched?.length===1)showCreate(preview);
+   else mount.insertAdjacentHTML('beforeend','<p>'+e((preview.blockers||[]).join(' '))+'</p>');
+   return;
+  }
+  mount.insertAdjacentHTML('beforeend','<form data-lw-roster-confirm><fieldset><legend>Fehlende IDs einzeln prüfen</legend>'+preview.candidates.map(m=>'<label><input type="checkbox" name="candidate" value="'+e(m.id)+'"> <span data-native-no-translate>'+e(m.name)+' · '+e(m.id)+' · '+e(m.rank)+'</span></label>').join('')+'</fieldset><label><input type="checkbox" name="source_checked" required> FULL CURRENT ROSTER: Originalquelle, SHA und vollständigen aktuellen Mitgliederbestand geprüft</label><label>Prüfbegründung<input name="reason" required minlength="8" maxlength="500"></label><p>'+e((preview.blockers||[]).join(' '))+'</p><button '+(!preview.ready?'disabled':'')+'>Geprüfte fehlende Mitglieder archivieren</button></form>');
+  const form=mount.querySelector('form');
+  form.addEventListener('submit',async event=>{
+   event.preventDefault();const ids=[...form.querySelectorAll('[name=candidate]:checked')].map(x=>x.value),button=form.querySelector('button');
+   if(!preview.ready||ids.length!==7||!form.elements.source_checked.checked||form.elements.reason.value.trim().length<8){message.textContent='Sieben IDs, FULL CURRENT ROSTER und Prüfbegründung ausdrücklich bestätigen.';return}
+   button.disabled=true;message.textContent='Bestandsabgleich und Rücklesekontrolle …';
+   try{
+    const receipt=await request(path,{method:'POST',body:{sha256:preview.sha256,revision:preview.revision,membership_revision:preview.membership_revision,member_ids:ids,source_checked:true,full_current_roster:true,reason:form.elements.reason.value}});
+    if(!current())return;
+    const reread=await request(path);if(!current())return;
+    const registry=await request('/api/member-registry');if(!current())return;
+    if(!receipt.ok||receipt.sha256!==preview.sha256||receipt.active_count!==98||!reread.reconciled||!reread.manual_creation_enabled||!checkRegistry(registry,receipt))throw Error('Quittung oder Bestands-Rücklesekontrolle unvollständig; neu laden.');
+    cache.registry=registry;show(reread);
+   }catch(error){if(current()){message.textContent=error.message;button.disabled=false}}
+  });
+ };
+ const showCreate=preview=>{
+  const source=preview.unmatched[0];
+  mount.insertAdjacentHTML('beforeend','<form data-lw-manual-create><p>Offene Quellzeile '+e(source.source_row)+': neue Identität manuell prüfen. Keine historischen Messwerte oder automatische Zuordnung.</p><label>Exakter Quellname<input name="player_name" required maxlength="80" value="'+e(source.source_name)+'" readonly data-native-no-translate></label><label>Bestätigten Rang prüfen (CSV: '+e(source.source_rank??source.rank)+')<select name="rank" required>'+['R1','R2','R3','R4','R5'].map(rank=>'<option '+(rank===source.rank?'selected':'')+'>'+rank+'</option>').join('')+'</select></label><label>Prüfbegründung<input name="reason" required minlength="8" maxlength="500"></label><label><input name="source_checked" type="checkbox" required> Neue Identität, exakten Namen und bestätigten Rang geprüft; CSV-Quellrang darf abweichen; keine bestehende oder archivierte Person</label><button>Mitglied manuell anlegen</button></form>');
+  const form=mount.querySelector('[data-lw-manual-create]');
+  form.addEventListener('change',event=>{if(event.target.name==='rank')form.elements.source_checked.checked=false});
+  form.addEventListener('submit',async event=>{
+   event.preventDefault();const button=form.querySelector('button');
+   if(button.disabled)return;
+   const expectedRank=form.elements.rank.value,sourceRank=source.source_rank??source.rank;
+   if(!form.elements.source_checked.checked||form.elements.reason.value.trim().length<8){message.textContent='Neue Identität und bestätigten Rang mit Begründung prüfen.';return}
+   button.disabled=true;
+   try{
+    const latest=await request(path);if(!current())return;
+    if(!latest.manual_creation_enabled||latest.active_count!==98||latest.sha256!==preview.sha256)throw Error('Bestand geändert; manuelle Neuanlage erneut prüfen.');
+    const created=await request('/api/member-registry/create',{method:'POST',body:{name:source.source_name,rank:expectedRank,reason:form.elements.reason.value,source_rank:sourceRank,rank_confirmation_source:expectedRank!==sourceRank?'verified_user_correction':'officer_checked_csv_rank',officer_reviewed:form.elements.source_checked.checked}});if(!current())return;
+    const registry=await request('/api/member-registry');if(!current())return;
+    const reread=await request('/api/lw-import/'+batch.id);if(!current())return;
+    const member=registry.members.find(m=>m.id===created.member_id),row=reread.rows.find(r=>r.source_row===source.source_row);
+    if(!created.ok||!member||member.rank!==expectedRank||(created.rank!==undefined&&created.rank!==expectedRank)||member.name!==source.source_name||member.lifecycle!=='active'||registry.counts.active!==99||registry.members.filter(m=>m.lifecycle==='active').length!==99||row?.member_id||row?.applied_at)throw Error('Neuanlage nicht vollständig rückbestätigt; neu laden, nicht erneut anlegen.');
+    cache.registry=registry;renderLwBatch(host,reread,live);
+    host.querySelector('[data-lw-result]').textContent='99 aktive Mitglieder bestätigt. Neue member_id: '+created.member_id+'. Jetzt Quellzeile ausdrücklich dieser ID zuordnen und Werte separat freigeben. Keine Werte automatisch übernommen.';
+   }catch(error){if(current()){message.textContent=error.message;message.append(' Bei möglichem HTTP-Erfolg zuerst Bestand neu laden.')}}
+  });
+ };
+ load.addEventListener('click',async()=>{
+  load.disabled=true;message.textContent='Geschützte Bestandsvorschau wird geladen …';
+  try{const preview=await request(path);if(!current())return;message.textContent='';show(preview)}
+  catch(error){if(current())message.textContent=error.message}
+  finally{if(current())load.disabled=false}
+ });
+}
+// G2 supplies the census preview with the batch; never replay the historical seven-ID archive.
+function initCurrentLwRoster(host,batch,live){
+ const load=host.querySelector('[data-lw-roster-load]'),mount=host.querySelector('[data-lw-roster-preview]'),message=host.querySelector('[data-lw-roster-result]');
+ const path='/api/lw-import/'+batch.id;
+ const current=()=>live()&&load.isConnected;
+ load.addEventListener('click',async()=>{
+  load.disabled=true;message.textContent='Bestand und Quellrevision werden neu geladen …';
+  try{
+   const fresh=await request(path);if(!current())return;
+   if(fresh.id!==batch.id||fresh.sha256!==batch.sha256)throw Error('Bestandsquelle stimmt nicht überein.');
+   const r=fresh.reconciliation,gate=fresh.roster_gate,active=fresh.roster_state?.active_ids;
+   if(!r||!gate||!Array.isArray(active))throw Error('Bestandsvorschau nicht verfügbar.');
+   const ids=fresh.rows.map(row=>row.member_id);
+   const ready=gate.officer_attestation?.supported===true&&gate.officer_attestation.endpoint===path+'/reconcile'&&
+    fresh.rows.length===fresh.row_count&&ids.every(Boolean)&&new Set(ids).size===ids.length&&
+    ids.length===active.length&&ids.every(id=>active.includes(id))&&
+    !r.archived.length&&!r.reactivated.length&&!r.unmatched.length&&!r.blocked.length&&
+    !gate.blockers.some(b=>['superseded_source','ambiguous_identity','blocked_identity','unresolved_identity'].includes(b));
+   mount.innerHTML='<p>'+active.length+' aktive Mitglieder · '+fresh.row_count+' Quellzeilen · '+r.archived.length+' Archivierungen · '+r.reactivated.length+' Rückkehrer · '+r.unmatched.length+' ungeklärt</p>'+
+    '<p>Dieser Abgleich erfordert dieselben bestehenden IDs, ohne neue Konten, Archivierungen oder Rückkehrer. Namensänderungen werden ausdrücklich geprüft.</p>'+
+    '<ul data-native-no-translate>'+r.renamed.map(m=>'<li>'+e(m.member_id)+' · '+e(m.previous_name)+' → '+e(m.name)+'</li>').join('')+'</ul>'+
+    '<form data-lw-current-roster><label><input type="checkbox" name="checked" required> Vollständigen aktuellen Bestand, Original-SHA und alle Identitäten geprüft</label><label>Prüfbegründung<input name="reason" required minlength="8" maxlength="500"></label><button '+(!ready||fresh.reconciliation_receipt?'disabled':'')+'>Geprüften aktuellen Bestand bestätigen</button></form>';
+   message.textContent=fresh.reconciliation_receipt?'Bestandsabgleich bereits quittiert; keine erneute Übernahme.':ready?'Vorschau geladen. Noch keine Daten geändert.':'Zuerst alle Identitäten im nativen Review klären. Unerwartete Bestandsänderungen bleiben gesperrt.';
+   const form=mount.querySelector('form');
+   form.addEventListener('submit',async event=>{
+    event.preventDefault();if(!ready||!form.elements.checked.checked||form.elements.reason.value.trim().length<8)return;
+    const button=form.querySelector('button');if(button.disabled)return;button.disabled=true;
+    try{
+     const receipt=await request(path+'/reconcile',{method:'POST',body:{sha256:fresh.sha256,source_revision:fresh.revision,registry_revision:gate.registry_revision,member_count:fresh.row_count,full_roster_attested:true,new_members:[],reason:form.elements.reason.value}});
+     const reread=await request(path);if(!current())return;
+     const result=receipt.result,saved=reread.reconciliation_receipt;
+     if(!receipt.ok||result?.created!==0||result.archived!==0||result.reactivated!==0||!saved||saved.receipt_id!==receipt.receipt_id||reread.sha256!==fresh.sha256||reread.counts.applied!==fresh.row_count||
+      reread.rows.some(row=>!row.applied_at||!fresh.rows.some(old=>old.source_row===row.source_row&&old.member_id===row.member_id))||
+      JSON.stringify([...reread.roster_state.active_ids].sort())!==JSON.stringify([...active].sort()))throw Error('Quittung oder Bestands-Rücklesekontrolle unvollständig. Batch neu laden; nicht erneut senden.');
+     renderLwBatch(host,reread,live);host.querySelector('[data-lw-result]').textContent='Bestandsabgleich quittiert und erneut gelesen: '+fresh.row_count+' bestehende IDs, keine Archivierung oder Neuanlage.';
+    }catch(error){if(current())message.textContent=error.message+' Vor erneutem Senden Batch neu laden.'}
+   });
+  }catch(error){if(current())message.textContent=error.message}
+  finally{if(current())load.disabled=false}
+ });
+}
+async function initPendingReviews(host){
+ const generation=sessionGeneration,live=()=>host.isConnected&&panel==='reviews'&&generation===sessionGeneration;
+ const en=officerLanguage(host.ownerDocument)==='en',t=(de,english)=>en?english:de;
+ host.innerHTML='<details class="native-fold" open><summary>'+t('Offene Quellbeobachtungen','Pending source observations')+'</summary><div class="native-fold-body"><p>'+t('Unbekannte Werte und Identitäten bleiben offen, auch wenn kein OCR-Prüffall besteht.','Unknown values and identities remain pending even when no OCR case exists.')+'</p><p data-pending-status role="status" aria-live="polite">'+t('Wird geladen …','Loading …')+'</p><div data-pending-queues></div><button type="button" data-pending-reload>'+t('Neu laden','Reload')+'</button></div></details>';
+ const status=host.querySelector('[data-pending-status]'),list=host.querySelector('[data-pending-queues]');
+ const load=async()=>{
+  try{
+   const result=await request('/api/reviews/pending');if(!live())return;
+   const titles={donations:t('Spenden unbekannt','Unknown donations'),vs_days:t('VS-Tageswerte unklar','Uncertain VS days'),identities:t('Identitäten ungeklärt','Unresolved identities'),lw_import:'LW Import'};
+   list.replaceChildren();
+   for(const [key,queue] of Object.entries(result.queues||{})){
+    const section=host.ownerDocument.createElement('details');section.className='native-fold';
+    section.innerHTML='<summary>'+e(titles[key]||key)+' · '+(queue.available?e(queue.count):t('nicht verfügbar','unavailable'))+'</summary><div class="native-fold-body"></div>';
+    const body=section.querySelector('div');
+    if(!queue.available)body.textContent=t('Quelle nicht verfügbar. Kein bestätigter Nullbestand.','Source unavailable. No confirmed zero count.');
+    for(const item of queue.items||[]){
+     const button=host.ownerDocument.createElement('button');button.type='button';button.setAttribute('data-native-no-translate','');button.textContent=(item.source_name||'Unbekannt')+' · '+(item.week||'historisch')+' · '+(item.metric||'Identität');button.disabled=!cache.reviewWritesEnabled;
+     button.addEventListener('click',async()=>{button.disabled=true;try{
+      await request('/api/reviews/open',{method:'POST',body:{...item,queue:key}});
+      if(!live())return;cache.reviews=await request('/api/reviews?status=open');if(!live())return;
+      const target=host.closest('#native-admin-content');renderReviews(target,target.querySelector('#review-search-native')?.value||'');status.textContent=t('Prüffall geöffnet. Identität oder Wert im nativen Review prüfen.','Case opened. Check the identity or value in the native review.');
+     }catch(error){if(live()){status.textContent=error.message;button.disabled=false}}});body.append(button);
+    }
+    list.append(section);
+   }
+   status.textContent=t('Quellen einzeln gelesen. Zähler können sich überschneiden.','Sources read separately. Counts can overlap.');
+  }catch(error){if(live())status.textContent=t('Quellbeobachtungen nicht verfügbar: ','Source observations unavailable: ')+error.message}
+ };
+ host.querySelector('[data-pending-reload]').addEventListener('click',()=>void load());await load();
+}
+function lwSourceFields(source){
+ return '<dl class="native-lw-source" data-native-no-translate>'+Object.entries(source||{}).map(([key,value])=>'<div><dt>'+e(key)+'</dt><dd>'+e(value===''?'nicht erfasst':value)+'</dd></div>').join('')+'</dl>';
+}
+function lwReviewCard(item,writes){
+ const c=item.context||{};
+ return '<details class="native-review-card native-lw-review" data-review-id="'+e(item.id)+'" data-review-kind="lw_import"><summary><strong data-native-no-translate>'+e(item.source_name)+'</strong> · LW Import · Zeile '+e(c.source_row)+' · '+e(c.match_state)+'</summary><div class="native-review-body"><p data-native-no-translate>LW Import · '+e(c.date)+'<br>Batch '+e(c.batch_id)+'<br>SHA256 '+e(c.sha256)+'</p>'+lwSourceFields(c.source)+'<p>'+e((c.errors||[]).join(' · '))+'</p>'+
+  '<form data-lw-review-form><label>Bestehende member_id<select name="member_id" required><option value="">Zuordnung wählen</option>'+(cache.reviewMembers||[]).map(m=>'<option value="'+e(m.id)+'" '+(m.id===c.member_id?'selected':'')+'>'+e(m.name)+' · '+e(m.id)+'</option>').join('')+'</select></label><label>Prüfbegründung<input name="reason" required minlength="8" maxlength="500"></label><label><input name="checked" type="checkbox" required> CSV-Quellzeile und Identität geprüft</label><button '+(!writes||c.match_state==='blocked'?'disabled':'')+'>Zuordnung bestätigen</button></form><p class="native-review-message" role="status" aria-live="polite"></p></div></details>';
+}
+async function saveLwReview(event){
+ event.preventDefault();const form=event.target,card=form.closest('[data-review-id]'),item=cache.reviews.find(r=>r.id===card.dataset.reviewId),message=card.querySelector('.native-review-message');
+ const button=form.querySelector('button'),generation=sessionGeneration;button.disabled=true;message.textContent='LW Import: Zuordnung wird geprüft …';
+ try{
+  const result=await request('/api/reviews/'+encodeURIComponent(item.id)+'/resolve',{method:'POST',body:{action:'approve',member_id:form.elements.member_id.value,reason:form.elements.reason.value,source_checked:form.elements.checked.checked,sha256:item.context.sha256}});
+  if(generation!==sessionGeneration||!card.isConnected)return;
+  if(result.ok!==true||result.review_id!==item.id||result.applied!==false)throw Error('LW Import: Zuordnung nicht bestätigt');
+  cache.reviews=cache.reviews.filter(r=>r.id!==item.id);card.replaceChildren();message.textContent='LW Import: Identität bestätigt. Werte im LW Import separat freigeben.';card.append(message);
+ }catch(error){if(generation===sessionGeneration&&card.isConnected){message.textContent=error.message;button.disabled=false}}
+}
 async function showPerson(target,id){
  const node=target.querySelector('#native-person');if(!node)return;
  node.innerHTML='<p role="status" class="native-muted">Spielerakte wird geladen …</p>';
@@ -480,10 +763,10 @@ async function showPerson(target,id){
  try{p=await request('/api/member/'+encodeURIComponent(id))}
  catch(error){
   node.innerHTML='<p class="native-error" role="alert">Spielerakte konnte nicht geladen werden: '+e(error.message)+'</p>'+
-   '<button type="button" data-native-member="'+e(id)+'">Erneut versuchen</button><button type="button" data-native-member-close>Zurück</button>';
+   '<button type="button" data-native-member="'+e(id)+'">Erneut versuchen</button>';
   return;
  }
- const member=p.member||{},metrics=profileMetricChanges(p.stats||[]);
+ const member=p.member||{};
  const weeks=(p.weeks||[]).slice().sort((a,b)=>String(b.week).localeCompare(String(a.week)));
  // The roster is still in the DOM so search state and expanded ranks survive Back.
  const roster=target.querySelector('.native-member-folds');if(roster)roster.hidden=true;
@@ -496,18 +779,6 @@ async function showPerson(target,id){
  const now=new Intl.DateTimeFormat('sv-SE',{timeZone:'Europe/Berlin'}).format(new Date());
  const active=absences.filter(a=>a.start_date<=now&&a.end_date>=now);
  const attendance=absences.slice().sort((a,b)=>b.start_date.localeCompare(a.start_date)).slice(0,8);
- const safeStats=(p.stats||[]).filter(s=>['observed','corrected'].includes(s.quality)&&Number.isSafeInteger(s.value));
- const metricHtml=metrics.length?'<div class="native-profile-metrics">'+metrics.map(m=>{
-  const timeline=safeStats.filter(s=>s.metric===m.metric).sort((a,b)=>String(b.captured_at).localeCompare(String(a.captured_at)));
-  return '<details class="native-profile-metric-card"><summary><small>'+e(m.label)+'</small><strong>'+numberText(m.value)+'</strong>'+
-   '<span class="'+(m.delta===null?'':'native-metric-change')+'">'+e(deltaLabel(m.delta))+'</span>'+
-   '<small>'+e(m.deltaSinceFirst===null?'Erst eine bestätigte Aufnahme – noch kein Langzeitvergleich':
-    'Seit '+m.firstDate+': '+(m.deltaSinceFirst>0?'+':'')+numberText(m.deltaSinceFirst))+'</small>'+
-   '<small>'+e(metricQuality[m.quality]||'Bestätigt')+' · '+e(m.date)+'</small><em>Alle '+timeline.length+' Messungen anzeigen ›</em></summary>'+
-   '<div class="native-profile-timeline">'+timeline.map((s,i)=>'<div><time>'+e(String(s.captured_at).slice(0,10))+'</time><b>'+statValueButton(s.value,s.snapshot_id,id,s.metric,member.name)+'</b>'+
-     '<small>'+e(i+1<timeline.length?deltaLabel(s.value-timeline[i+1].value):'Erste Messung')+'</small></div>').join('')+'</div></details>';
- }).join('')+'</div>':
-  '<p class="native-muted">Noch keine bestätigten Messungen. Fehlende Werte werden nicht als Null bewertet.</p>';
  const weekdays=['Mo','Di','Mi','Do','Fr','Sa'];
  const weekSummary=weeks.length?'<div class="native-profile-weeks">'+weeks.map((w,i)=>{
   const days=(p.days||[]).filter(d=>d.week===w.week);
@@ -528,7 +799,7 @@ async function showPerson(target,id){
     'Bestätigter Teilstand: '+(computed.partial===null?'—':numberText(computed.partial))+' · '+computed.confirmed+'/6')+
     '</span></div>'+days.map(day=>'<div><span>'+e(weekdays[day.weekday]||'?')+'</span><button type="button" class="native-vs-day-link" data-native-vs-image="'+e(w.week+'|'+id+'|'+day.weekday)+'" title="Privaten Screenshot öffnen"><b>'+
     (['observed','corrected'].includes(day.quality)&&day.points!==null?numberText(day.points):'Unbekannt')+
-    '</b><small>'+e(officerStatusLabel(day.quality))+' · Bild ansehen</small></button></div>').join('')+'</div></details>';
+    '</b><small>'+e(day.quality||'nicht gelesen')+' · Bild ansehen</small></button></div>').join('')+'</div></details>';
  }).join('')+'</div>':
   '<p class="native-muted">Noch kein VS-Wochenverlauf vorhanden.</p>';
  const rides=(p.rides||[]).slice().sort((a,b)=>b.date.localeCompare(a.date));
@@ -537,7 +808,7 @@ async function showPerson(target,id){
  const line=(date,detail,sub)=>'<div><time>'+e(date)+'</time><b>'+e(detail)+'</b><small>'+e(sub||'')+'</small></div>';
  const historyCards='<div class="native-profile-metrics native-player-history-cards">'+
   '<details class="native-profile-metric-card"><summary><small>Zugfahrten</small><strong>'+rides.filter(x=>x.status==='completed').length+'</strong><span>Bestätigte Fahrten</span><em>Alle '+rides.length+' Einträge ansehen ›</em></summary>'+
-   '<div class="native-profile-timeline">'+(rides.length?rides.map(x=>line(x.date,x.type||'Zug',officerStatusLabel(x.status))).join(''):'<p>Keine zugeordneten Fahrten</p>')+'</div></details>'+
+   '<div class="native-profile-timeline">'+(rides.length?rides.map(x=>line(x.date,x.type||'Zug',x.status||'')).join(''):'<p>Keine zugeordneten Fahrten</p>')+'</div></details>'+
   '<details class="native-profile-metric-card"><summary><small>Dice Game</small><strong>'+dice.length+'</strong><span>Gewonnene Ziehungen</span><em>Gewinne anzeigen ›</em></summary>'+
    '<div class="native-profile-timeline">'+(dice.length?dice.map(x=>line(x.ride_date,'Dice Game gewonnen',x.roll_value===null?'Wurf unbekannt':'Wurf: '+x.roll_value)).join(''):'<p>Noch kein bestätigter Gewinn</p>')+'</div></details></div>';
  const achievementHtml=achievements.length?'<details class="native-fold"><summary>Erfolge & Meilensteine · '+achievements.length+'</summary>'+
@@ -545,7 +816,7 @@ async function showPerson(target,id){
    a.delta!==null&&a.delta!==undefined?deltaLabel(a.delta):'Bestätigte VS-Leistung')).join('')+'</div></details>':
   '<p class="native-muted">Noch keine nachweisbaren Meilensteine (+100.000 Kills, +1 Mio. Stärke oder 6/6 VS).</p>';
  node.innerHTML='<section class="native-profile"><div class="native-profile-header">'+
-  '<button type="button" class="native-back" data-native-member-close>← <span>'+(profileReturn&&profileReturn.panel!=='members'?'Zurück':'Alle Spieler')+'</span></button>'+
+  '<button type="button" class="native-back" data-native-member-close>← Alle Spieler</button>'+
   '<span class="native-profile-rank" aria-label="Allianzrang">'+e(member.rank||'?')+'</span>'+
   '<div class="native-profile-identity"><span class="native-kicker">SPIELERAKTE · '+e(member.status==='active'?'AKTIV':member.status==='former'?'ARCHIV':'STATUS UNGEKLÄRT')+'</span>'+
   '<h3>'+e(member.name||'Unbekannt')+'</h3><p>'+e(member.state_source==='registry'?'Verwalteter Rang':'Letzter importierter Rang')+
@@ -559,10 +830,10 @@ async function showPerson(target,id){
     '<label class="native-alias-ack"><input name="ack" type="checkbox" required> Ich habe die historische Schreibweise anhand einer Quelle geprüft.</label>'+
     '<div class="native-alias-actions"><button type="submit">Namen bestätigen</button><button type="button" data-native-alias-cancel>Abbrechen</button></div></form>':'')+
    '</div></details>'+
+  '<div data-lw-profile>'+renderLwProfile(p.lw_import,id,'power','5',p.stats||[],p.weeks||[],p.days||[])+'</div>'+
   (active.length?'<p class="native-absence-warning">Aktuell als abwesend eingetragen. Zugvorschläge berücksichtigen diesen Zeitraum.</p>':'')+
   (member.source_difference?'<p class="native-evidence-note">Abweichender Import: '+e(member.imported_rank||'Rang unbekannt')+' · '+e(member.source_status||'Status ungeklärt')+'. Der bestätigte Verwaltungsstand hat Vorrang.</p>':'')+
   (member.registry_updated_by?'<p class="native-muted">Letzte Rang-/Statusänderung: '+e(member.registry_updated_by)+' · '+e(formatOfficerTime(member.registry_updated_at))+'</p>':'')+
-  '<h4 class="native-section-heading">Werte & Entwicklung</h4>'+metricHtml+
   '<details class="native-fold"><summary>VS-Erfolge & Wochen · '+weeks.length+'</summary>'+
    '<div class="native-fold-body">'+weekSummary+'</div></details>'+
   '<h4 class="native-section-heading">Züge & Dice Game</h4>'+historyCards+
@@ -574,12 +845,28 @@ async function showPerson(target,id){
      (a.note?' · '+e(a.note):'')+'</p>').join('')+'</div>':
      '<p class="native-muted">Keine Abwesenheit eingetragen.</p>')+
    '<div id="native-person-absence-form"></div></section>'+
-  '<details class="native-fold"><summary>Verwaltung & Protokoll</summary>'+
+  '<details class="native-fold" data-native-member-history><summary>Verwaltung & Protokoll</summary>'+
    '<div class="native-fold-body"><div class="native-profile-actions">'+
     '<button type="button" data-native-manage="'+e(id)+'">Rang & Status bearbeiten</button>'+
     '<button type="button" data-native-member-log="'+e(id)+'">Änderungen anzeigen</button></div>'+
-    '<div id="native-person-log"></div><div id="registry-form"></div></div></details></section>';
+    renderMembershipEvents(p.events||[])+ '<div id="native-person-log" role="status" aria-live="polite">Verwaltungsprotokoll wird beim \u00f6ffnen geladen.</div><div id="registry-form"></div></div></details></section>';
+ node.querySelector('[data-native-member-history]').addEventListener('toggle',event=>{if(event.target.open&&!event.target.dataset.loaded){event.target.dataset.loaded='true';loadMemberActivity(node.querySelector('#native-person-log'),id)}});
  node.scrollIntoView({behavior:'smooth',block:'nearest'});
+ const lwHost=node.querySelector('[data-lw-profile]');
+ const updateLw=(metric,range,focus)=>{
+  const opened=[...lwHost.querySelectorAll('details')].map(fold=>fold.open);
+  lwHost.innerHTML=renderLwProfile(p.lw_import,id,metric,range,p.stats||[],p.weeks||[],p.days||[]);
+  lwHost.querySelectorAll('details').forEach((fold,i)=>{fold.open=opened[i]||false});
+  lwHost.querySelector(focus)?.focus({preventScroll:true});
+ };
+ lwHost?.addEventListener('click',event=>{
+  const button=event.target.closest('[data-lw-kpi]');if(!button)return;
+  updateLw(button.dataset.lwKpi,lwHost.querySelector('[data-lw-range]')?.value||'5','[data-lw-kpi="'+button.dataset.lwKpi+'"]');
+ });
+ lwHost?.addEventListener('change',event=>{
+  if(!event.target.matches('[data-lw-range]'))return;
+  updateLw(lwHost.querySelector('[data-lw-kpi][aria-pressed=true]').dataset.lwKpi,event.target.value,'[data-lw-range]');
+ });
  await loadMemberAliases(node.querySelector('.native-member-aliases'),id);
 }
 function showVsEvidenceUpload(area,key,message,source=null){
@@ -593,11 +880,10 @@ function showVsEvidenceUpload(area,key,message,source=null){
   '<button type="submit">Originalbild privat zuordnen</button>'+
   '<p role="status" class="native-vs-evidence-upload-result"></p></form>';
 }
-async function openVsScreenshot(target,key,returnTo=target.querySelector('[data-native-vs-image="'+key+'"]')||target.ownerDocument.activeElement){
+async function openVsScreenshot(target,key){
  const matched=/^(20\d{2}-W\d{2})\|([a-zA-Z0-9-]{1,80})\|([0-6])$/.exec(String(key));
  if(!matched)return;
  const [,week,memberId,weekday]=matched;
- vsDialogRelease?.();vsDialogRelease=null;
  target.querySelector('#native-vs-evidence-viewer')?.remove();
  const host=target.ownerDocument.createElement('section');
  host.id='native-vs-evidence-viewer';
@@ -611,10 +897,7 @@ async function openVsScreenshot(target,key,returnTo=target.querySelector('[data-
   '<div id="native-vs-evidence-image" class="native-stat-image" role="status">'+(weekday==='6'?'Wochenbeleg wird geprüft …':'Quellzeile wird ermittelt …')+'</div></div>';
  target.append(host);
  const area=host.querySelector('#native-vs-evidence-image');
- vsDialogRelease=bindEvidenceDialog(host,()=>{
-  host.remove();vsDialogRelease?.();vsDialogRelease=null;
-  for(const [imageKey,url] of reviewBlobUrls)if(imageKey.startsWith('vs:')){URL.revokeObjectURL(url);reviewBlobUrls.delete(imageKey)}
- },returnTo);
+ host.querySelector('[data-native-vs-image-close]')?.focus();
  const sourcePath='/api/vs-source/'+encodeURIComponent(week)+'/'+encodeURIComponent(memberId)+'/'+weekday;
  let source=null;
  try{
@@ -849,8 +1132,7 @@ function renderVs(target){
  if(!host)return;
  if(!week){host.innerHTML='<p class="native-muted">Noch keine VS-Woche importiert.</p>';return}
  const policy=cache.vs.policy||{};
- if(cache.vsView?.week!==week.week)cache.vsView={week:week.week,day:-1,category:'all',sort:cache.vsView?.sort||'priority',query:target.querySelector('#native-vs-search')?.value||'',limits:{},openGroups:[]};
- target.querySelector('#native-vs-search').value=cache.vsView.query||'';
+ if(cache.vsView?.week!==week.week)cache.vsView={week:week.week,day:-1,category:'all',sort:cache.vsView?.sort||'priority',query:'',limits:{},openGroups:[]};
  const enUi=officerLanguage(target.ownerDocument)!=='de';
  const layout=renderVsOverview(week,policy,{esc:e,numberText,formatTime:formatOfficerTime,language:officerLanguage(target.ownerDocument),view:cache.vsView});
  const lowWarnings=(week.members||[]).filter(x=>x.repeatedLowDays).length;
@@ -860,7 +1142,6 @@ function renderVs(target){
  const notices=[
   repeatCount>0?(enUi?repeatCount+' members repeatedly below the daily goal.':repeatCount+' Spieler wiederholt unter dem Tagesziel.'):null,
   participationWarnings>0?(enUi?participationWarnings+' members have too few active days with complete data.':participationWarnings+' Spieler mit zu wenigen aktiven Tagen bei vollständiger Erfassung.'):null,
-  week.beforeJoinDays>0?(enUi?week.beforeJoinDays+' missing days were before verified alliance joining dates and are not counted as zero or unclear.':week.beforeJoinDays+' fehlende Tage liegen vor belegten Allianzbeitritten und zählen weder als 0 noch als unklar.'):null,
   policy.shield_reminder_saturday?(enUi?'Saturday shield: remind manually; not automatically verified.':'Samstag: Schildpflicht manuell erinnern (nicht automatisch geprüft).'):null
  ].filter(Boolean);
  const kpi=(label,value,kind)=>'<div class="native-vs-kpi '+kind+'"><span>'+e(label)+'</span><strong>'+e(value)+'</strong></div>';
@@ -873,16 +1154,20 @@ function renderVs(target){
     'OCR '+e(reviewCount??'—')+'</button>'+
    '</div></div>'+
   '<div class="native-vs-kpis" aria-label="'+(enUi?'Weekly metrics':'Wochenkennzahlen')+'">'+
-    kpi(enUi?'Days below goal':'Tage unter Ziel',week.failedDays??'—','low')+
+    kpi(enUi?'Below goal (player-days)':'Unterschreitungen (Spieler-Tage)',week.failedDays??'—','low')+
+    kpi(enUi?'Affected players (unique IDs)':'Betroffene Spieler (eindeutige IDs)',week.affectedMembers??(week.members||[]).filter(p=>p.failed>0).length,'low')+
+    kpi(enUi?'Met player-days':'Erreichte Spieler-Tage',(week.metPlayerDays??'?')+' / '+(week.scopePlayerDays??'?'),'perfect')+
     kpi(enUi?'Unclear':'Unklar',week.unknownDays??'—','unknown')+
     kpi(enUi?'Perfect 6/6':'6 von 6',week.perfect??'—','perfect')+
   '</div>'+
   (notices.length?'<div class="native-vs-single-insight"><b>'+ (enUi?'Note':'Hinweis')+'</b>'+
-    '<span>'+notices.map(e).join(' · ')+'</span>'+reportContext(week,officerLanguage(target.ownerDocument))+'</div>':'')+
+    '<span>'+notices.map(e).join(' · ')+'</span></div>':'')+
+  '<p class="native-muted">'+(enUi?'One member can contribute six below-goal days. Scope: ':'Ein Spieler kann sechs Unterschreitungen beitragen. Umfang: ')+e(week.scopeMembers??'?')+(enUi?' unique IDs. Raw rows: ':' eindeutige IDs. Originalzeilen: ')+e(week.rawPlayerDays??'?')+(enUi?'; unlinked rows: ':'; davon ohne ID: ')+e(week.unresolvedPlayerDays??'?')+'</p>'+
   layout.dayTiles+layout.groupsHtml+
   '<details class="native-fold native-vs-explainer"><summary>'+ (enUi?'How are results assessed?':'Wie werden die Werte bewertet?')+'</summary>'+
    '<p class="native-fold-body native-muted">'+(enUi?'Weekly totals are calculated from six confirmed daily scores. Missing or unclear values are never zero; partial sums remain marked as incomplete.':'Die Wochensumme wird aus sechs bestätigten Tageswerten berechnet. Fehlende oder unklare Tage sind nie automatisch 0; Teilstände bleiben als unvollständig gekennzeichnet.')+'</p></details>'+
   '</section>';
+
 }
 function filterVsMembers(target){
  if(!cache.vsView)return;
@@ -1026,7 +1311,7 @@ function renderTrain(target){
  const slot=x=>'<article class="native-train-item '+(x.date===d.today?'native-train-today':'')+'">'+
   '<div><span class="native-kicker">'+(x.date===d.today?'HEUTE':e(x.date))+' · '+e(x.type||'Zug')+'</span>'+
   '<strong>'+e(x.entry?.driver||'Noch kein Fahrer eingetragen')+'</strong>'+
-   '<small>'+e(x.entry?.status?officerStatusLabel(x.entry.status):'Offen')+(x.entry?.linked===false?' · Zuordnung nicht verifiziert':'')+(x.unavailable_driver?' · Achtung: Abwesenheit eingetragen':'')+'</small>'+ (x.suggestions?.length?'<small class="native-train-recommendation">Vorschlag: '+e(x.suggestions[0].name)+' · '+e(x.suggestions[0].rank)+'</small>':'')+'</div>'+
+  '<small>'+e(x.entry?.status||'Offen')+(x.entry?.linked===false?' · Zuordnung nicht verifiziert':'')+(x.unavailable_driver?' · Achtung: Abwesenheit eingetragen':'')+'</small>'+ (x.suggestions?.length?'<small class="native-train-recommendation">Vorschlag: '+e(x.suggestions[0].name)+' · '+e(x.suggestions[0].rank)+'</small>':'')+'</div>'+
   '<div class="native-train-actions"><button type="button" data-native-train="'+e(x.date)+'">'+(x.entry?'Bearbeiten':'Fahrer wählen')+'</button>'+
   '<button type="button" data-native-dice-date="'+e(x.date)+'">🎲 '+e((cache.dice||[]).find(d=>d.ride_date===x.date)?.winner_name||'Dice Game')+'</button>'+
   (x.entry?.status==='planned'&&x.entry?.member_id&&(d.members||[]).some(m=>m.id===x.entry.member_id)?
@@ -1106,17 +1391,6 @@ const allianceEventLabels={
  zombie_siege:'Zombie Siege · Zombiebelagerung',
  desert_storm:'Desert Storm'
 };
-const verifiedProtocolStart=x=>String(x?.notes||'').startsWith('RZSN_GAME_LOG_START_CONFIRMED;');
-const reservedAutomaticStart=x=>{
- const notes=String(x?.notes||'');
- if(!notes.startsWith('RZSN_MARSHALL_AUTO_START_RESERVATION;'))return false;
- const match=notes.match(/server_time=(20\d\d-\d\d-\d\d \d\d:\d\d:\d\d)/);
- if(!match)return false;
- // Last War server clock is UTC-02:00: 16:00 game time = 18:00 UTC.
- const eventUtc=Date.parse(match[1].replace(' ','T')+'Z')+2*3600000;
- return Number.isFinite(eventUtc)&&eventUtc<=Date.now();
-};
-const logStart=x=>verifiedProtocolStart(x)||reservedAutomaticStart(x);
 const allianceEventOutcomeLabels={
  scheduled:'Geplant',completed:'Abgeschlossen',failed:'Nicht geschafft',cancelled:'Abgesagt'
 };
@@ -1129,8 +1403,7 @@ export function summarizeAllianceEventRuns(source,type){
     String(b.updated_at||'').localeCompare(String(a.updated_at||'')));
  const historical=entries.filter(x=>x.outcome==='completed'||x.outcome==='failed');
  const completed=entries.filter(x=>x.outcome==='completed');
- const planned=entries.filter(x=>x.outcome==='scheduled'&&!logStart(x));
- const started=entries.filter(logStart);
+ const planned=entries.filter(x=>x.outcome==='scheduled');
  const latest=historical[0]||null,previous=historical[1]||null;
  const number=x=>Number.isInteger(x)&&x>=1&&x<=999?x:null;
  const level=number(latest?.level),previousLevel=number(previous?.level);
@@ -1138,53 +1411,24 @@ export function summarizeAllianceEventRuns(source,type){
  const bestLevel=validLevels.length?Math.max(...validLevels):null;
  const waveValue=x=>Number.isInteger(x)&&x>=0&&x<=999?x:null;
  const waves=type==='zombie_siege'?waveValue(latest?.waves):null;
- return {type,entries,historical,completed,planned,started,latest,previous,
+ return {type,entries,historical,completed,planned,latest,previous,
   level,bestLevel,waves,deltaLevel:level!==null&&previousLevel!==null?level-previousLevel:null,
   confirmedCount:historical.length};
-}
-// Present verified fortress discoveries alongside Zombie Siege run records.
- // A discovery is a recorded occurrence, never evidence of victory or wave count.
- // A same-date/level scheduled placeholder is displayed only once.
-export function unifyAllianceEventHistory(source,fortressFinds,type){
- const runs=summarizeAllianceEventRuns(source,type).entries;
- if(type!=='zombie_siege')return runs;
- const discoveries=(Array.isArray(fortressFinds)?fortressFinds:[]).map(x=>{
-  let detail={};try{detail=JSON.parse(x?.settings_json||'{}')}catch{return null}
-  const date=String(x?.begins_at||'').slice(0,10);
-  if(!/^20\d{2}-\d{2}-\d{2}$/.test(date)||!Number.isInteger(detail.level)||
-   detail.level<1||detail.level>999||typeof detail.member_id!=='string'||!x?.id)return null;
-  return {id:x.id,event_type:'zombie_siege',event_date:date,level:detail.level,
-   lead_id:detail.member_id,source_name:detail.source_name||null,
-   begins_at:x.begins_at,source_kind:'fortress_found',outcome:detail.confirmed_outcome==='completed'?'completed':'found',
-   waves:null,attendance:null,source_sha256:detail.source_sha256||null};
- }).filter(Boolean);
- const matches=new Set(discoveries.map(x=>x.event_date+'|'+x.level));
- return [...runs.filter(x=>!(x.outcome==='scheduled'&&matches.has(x.event_date+'|'+x.level))),
-  ...discoveries].sort((a,b)=>b.event_date.localeCompare(a.event_date)||
-   String(b.begins_at||b.updated_at||'').localeCompare(String(a.begins_at||a.updated_at||'')));
 }
 function renderEventRuns(target){
  const data=cache.ops,entries=data?.events||[];
  const names=new Map((data?.members||[]).map(m=>[m.id,m.name]));
  const german=officerLanguage(target.ownerDocument)==='de';
- const t=(de,en)=>german?de:en;
  const attendanceLabel=x=>Number.isInteger(x.attendance)?x.attendance+(german?' Teilnehmer · Offizierseintrag':' participants · officer entry'):(german?'Teilnahme nicht belegt':'Attendance not evidenced');
- const eventRow=x=>x.source_kind==='fortress_found'?
-  '<article class="native-event-history-row"><span><b>'+e(x.begins_at||x.event_date)+'</b><small>'+t(x.outcome==='completed'?'Abgeschlossen · von dir bestätigt':'Festung gefunden · Ergebnis offen',x.outcome==='completed'?'Completed · user-confirmed':'Fortress found · result unknown')+'</small></span>'+
-  '<span><strong>'+e(x.level)+'</strong><small>'+t('Level','Level')+'</small></span>'+
-  '<span class="native-event-history-actor"><strong>'+e(names.get(x.lead_id)||x.source_name||t('Spieler ungeklärt','Unlinked player'))+'</strong><small>'+t('Entdecker · Originalbeleg','Discoverer · original evidence')+'</small></span></article>':
-  '<button type="button" class="native-event-history-row" data-native-edit="'+e(x.id)+'">'+
-  '<span><b>'+e(x.event_date)+'</b><small>'+e(x.outcome==='completed'?t('Abgeschlossen','Completed'):reservedAutomaticStart(x)?t('Automatischer Start laut Reservierung · Ergebnis offen','Auto-started from reservation · result unknown'):x.outcome==='scheduled'&&verifiedProtocolStart(x)?t('Start nachgewiesen · Ergebnis offen','Start evidenced · result unknown'):allianceEventOutcomeLabels[x.outcome]||t('Nicht bestätigt','Not confirmed'))+'</small></span>'+
+ const eventRow=x=>'<button type="button" class="native-event-history-row" data-native-edit="'+e(x.id)+'">'+
+  '<span><b>'+e(x.event_date)+'</b><small>'+e(allianceEventOutcomeLabels[x.outcome]||'Nicht bestätigt')+'</small></span>'+
   '<span><strong>'+e(x.level??'—')+'</strong><small>Level</small></span>'+
   (x.event_type==='zombie_siege'?'<span><strong>'+e(x.waves??'—')+'</strong><small>Wellen</small></span>':'')+
-   '<span class="native-event-history-actor">'+e(names.get(x.lead_id)||'Leitung offen')+'<small>'+e(reservedAutomaticStart(x)?t('Reserviert von Spieler','Reserved by player')+' · '+attendanceLabel(x):verifiedProtocolStart(x)?'Startender Spieler · '+attendanceLabel(x):attendanceLabel(x))+'</small></span></button>';
+   '<span class="native-event-history-actor">'+e(names.get(x.lead_id)||'Leitung offen')+'<small>'+e(attendanceLabel(x))+'</small></span></button>';
  const groups=['zombie_siege','marshall_guard'].map(type=>{
-  const history=unifyAllianceEventHistory(entries,cache.ops?.fortressFinds,type);
-  const data=summarizeAllianceEventRuns(history,type);
-  const last=type==='zombie_siege'?(history[0]||null):(data.latest||history[0]||null);
-  const latestLevel=type==='zombie_siege'?(last?.level??'—'):(data.level??'—');
-  const diff=last?.source_kind==='fortress_found'&&last.outcome!=='completed'?t('Fund belegt · Ausgang offen','Discovery confirmed · result unknown'):
-   data.deltaLevel===null?'Noch kein direkter Vergleich':
+  const data=summarizeAllianceEventRuns(entries,type);
+  const last=data.latest,latestLevel=data.level??'—';
+  const diff=data.deltaLevel===null?'Noch kein direkter Vergleich':
    data.deltaLevel===0?'Level unverändert':(data.deltaLevel>0?'+':'')+data.deltaLevel+' Level zum vorherigen Durchgang';
   const today=new Intl.DateTimeFormat('sv-SE',{timeZone:'Europe/Berlin'}).format(new Date());
   const upcoming=data.planned.filter(x=>x.event_date>=today).sort((a,b)=>a.event_date.localeCompare(b.event_date))[0];
@@ -1195,11 +1439,11 @@ function renderEventRuns(target){
    '<h3>'+e(allianceEventLabels[type])+'</h3></div>'+
    '<button type="button" class="native-game-primary" data-native-event-quick="'+type+'">+ Durchgang</button></div>'+
    '<div class="native-event-summary">'+
-   '<div><small>'+t('Letzter Durchgang','Latest run')+'</small><strong>'+e(last?.event_date||'—')+'</strong>'+
-    '<span>'+e(last?.source_kind==='fortress_found'&&last.outcome==='completed'?t('Abgeschlossen · von dir bestätigt','Completed · user-confirmed'):last?.source_kind==='fortress_found'?t('Festung gefunden · Ergebnis offen','Fortress found · result unknown'):(last?allianceEventOutcomeLabels[last.outcome]:t('Noch nicht dokumentiert','Not yet documented')))+'</span></div>'+
+   '<div><small>Letztes Ergebnis</small><strong>'+e(last?.event_date||'—')+'</strong>'+
+    '<span>'+e(last?allianceEventOutcomeLabels[last.outcome]:'Noch nicht dokumentiert')+'</span></div>'+
    '<div><small>Letztes Level</small><strong>'+e(latestLevel)+'</strong><span>'+e(diff)+'</span></div>'+
    '<div><small>'+(type==='zombie_siege'?'Letzte Wellen':'Höchstes abgeschlossenes Level')+'</small>'+
-   '<strong>'+e(type==='zombie_siege'?(last?.waves??'—'):(data.bestLevel??'—'))+'</strong>'+
+   '<strong>'+e(type==='zombie_siege'?data.waves??'—':data.bestLevel??'—')+'</strong>'+
    '<span>'+data.confirmedCount+' dokumentierte Ergebnisse</span></div></div>'+
    (upcoming?'<p class="native-event-next">Nächster eingetragener Termin: <b>'+e(upcoming.event_date)+'</b> · Level '+e(upcoming.level??'offen')+'</p>':
    '<p class="native-muted">Kein zukünftiger Termin eingetragen. Keine automatische Terminprognose.</p>')+
@@ -1208,11 +1452,9 @@ function renderEventRuns(target){
      bars.map(x=>'<div><span class="native-event-bar '+(x.outcome==='failed'?'native-event-bar--failed':'')+'" style="height:'+Math.round(x.level/ceiling*100)+'%"></span>'+
       '<b>'+e(x.level)+'</b><small>'+e(x.event_date.slice(5))+'</small></div>').join('')+'</div>':
     '<p class="native-muted">Noch keine bestätigten Level für einen Verlauf vorhanden.</p>')+
-   (data.started.length?'<p class="native-muted">'+data.started.length+' '+t('protokollierte oder automatisch ausgelöste Starts · Level nur aus Beleg; Ergebnisse ohne Abschlusslog offen.','recorded or auto-triggered starts · Levels need evidence; no completion is assumed.')+'</p>':'')+
-   '<details class="native-fold"><summary>Alle Durchgänge · '+history.length+'</summary>'+
-    '<div class="native-fold-body native-event-history">'+(history.length?history.map(eventRow).join(''):
-    '<p class="native-muted">Noch keine erfassten Durchgänge.</p>')+'</div></details>'+
-   '</section>';
+   '<details class="native-fold"><summary>Alle Durchgänge · '+data.entries.length+'</summary>'+
+    '<div class="native-fold-body native-event-history">'+(data.entries.length?data.entries.map(eventRow).join(''):
+    '<p class="native-muted">Noch keine erfassten Durchgänge.</p>')+'</div></details></section>';
  }).join('');
  const other=entries.filter(x=>x.event_type==='desert_storm');
  target.querySelector('#native-records').innerHTML='<div class="native-event-intro"><p>Alle paar Tage erfassen: <strong>Level, Wellen, Ergebnis und Teilnahme</strong>. Jeder Durchgang bleibt mit Datum und verantwortlichem Officer erhalten.</p><p class="native-muted">'+(german?'Teilnahme ist ein manueller Offizierseintrag und wird ohne Beleg nicht automatisch ergänzt.':'Attendance is entered manually by an officer and is never inferred without evidence.')+'</p></div>'+
@@ -1337,16 +1579,17 @@ function renderMembershipWatch(target){
  const data=cache.watch||{},host=target.querySelector('#native-watch-list');if(!host)return;
  const count=membershipWatchSummary(data),list=data.candidates||[];
  const policy=cache.archiveEligibility;
- const autoArchiveHint=policy?'<p class="native-evidence-note"><strong>Mitglieder-Abgleich</strong> · '+
-  '<span>'+(policy.ready?'Bereit':'Weitere finalisierte Vergleiche notwendig')+'</span> · '+
-  '<span>Prüfkandidaten</span>: '+(policy.candidates?.length||0)+
-  '<br><span>Austritte und Rückkehr werden aus zwei vollständig bestätigten Profilbeständen aufeinanderfolgender Wochen ermittelt. VS-Punkte und Allianzlogs allein ändern den Status nicht.</span></p>':'';
+ const de=officerLanguage(target.ownerDocument)==='de';
+ const autoArchiveHint='<p class="native-evidence-note"><strong>'+(de?'Mitgliederstatus nach gepr\u00fcftem Bestand:':'Membership based on a verified roster:')+'</strong> '+
+  (de?'Automatische \u00c4nderungen erfordern einen vollst\u00e4ndigen aktuellen Mitgliederbestand und best\u00e4tigte Identit\u00e4ten. Null VS, Kills oder Spenden beweisen keinen Austritt. R4/R5 k\u00f6nnen einen pers\u00f6nlich gepr\u00fcften Austritt mit Quelle, Grund und ausdr\u00fccklicher Best\u00e4tigung manuell archivieren.':
+   'Automatic changes require a verified complete current member roster and confirmed identities. Zero VS, kills or donations never prove departure. R4/R5 may manually archive a witnessed departure with a checked source, reason and explicit confirmation.')+
+  (policy?.ready?' '+(policy.candidates?.length||0)+(de?' best\u00e4tigte Bestandskandidaten.':' confirmed roster candidates.'):(de?' Automatischer Bestandsabgleich wartet auf vollst\u00e4ndige Nachweise.':' Automatic reconciliation awaits complete evidence.'))+'</p>';
  const snapshotInfo=(data.profile?.current?.captured_at?'Stärke '+data.profile.current.captured_at.slice(0,10):'Stärke ohne Vergleich')+
   ' · '+(data.vs?.current?.week?'VS '+data.vs.current.week:'VS ohne Vergleich');
  host.innerHTML='<p class="native-muted">'+e(snapshotInfo)+' · Quellen sind unterschiedlich vollständig</p>'+autoArchiveHint+
   cards([['Prüfkandidaten',count.count],['In beiden Listen fehlend',count.both],
    ['Im Stärke-Snapshot fehlend',count.profile],['In VS-Liste fehlend',count.vs]])+
-  '<p class="native-evidence-note"><span>Einzelne fehlende Bilder oder Werte belegen keinen Austritt. Die Blacklist wird nur manuell mit Begründung geändert.</span></p>'+
+  '<p class="native-evidence-note"><strong>Kein automatischer Austritt:</strong> Fehlt ein Spieler auf einem Screenshot, bleibt er aktiv. Bei fehlenden Daten ist keine Blacklist zulässig. Status und Blacklist werden ausschließlich manuell in der Spielerakte geändert.</p>'+
   (data.state==='insufficient_history'?
    '<p class="native-muted">Für einen verlässlichen Vergleich benötigen wir mindestens zwei vollständige Profil-Aufnahmen oder zwei abgeschlossene VS-Wochen.</p>':
    list.length?'<div class="native-list native-watch-candidates">'+list.map(m=>
@@ -1355,7 +1598,9 @@ function renderMembershipWatch(target){
     '<p>'+e(m.missing_profile?'Neue Stärke-Aufnahme: nicht enthalten':'Stärke-Aufnahme: keine neue Abweichung')+'</p>'+
     '<p>'+e(m.missing_vs?'Neue VS-Aufnahme: nicht enthalten':'VS-Aufnahme: keine neue Abweichung')+'</p>'+
     '<small>Zuletzt gesehen: '+e(m.last_seen||'Unbekannt')+(m.blacklisted?' · Bereits manuell gesperrt':'')+'</small></div>'+
-    '<button type="button" data-native-watch-person="'+e(m.id)+'">Spielerakte prüfen</button></article>'
+    '<div class="native-row"><button type="button" data-native-watch-person="'+e(m.id)+'">Spielerakte prüfen</button>'+
+    (canManageSite()||!['R4','R5'].includes(m.rank)?'<button type="button" data-native-watch-archive="'+e(m.id)+'">Austritt erfassen</button>':'')+
+    '</div></article>'
    ).join('')+'</div>':
    '<p class="native-muted">In den aktuell vergleichbaren Aufnahmen sind keine fehlenden Spieler aufgefallen. Das ist kein vollständiger Anwesenheitsnachweis.</p>');
 }
@@ -1445,7 +1690,7 @@ export function historicalFormerRegistryEntries(entries=[],registered=[]){
  const combined=mergeFormerMemberRows(list,visibleHistorical);
  const rows=combined.slice(0,pageLimit).map(entry=>entry.kind==='member'?
   '<button type="button" data-registry-edit="'+e(entry.value.id)+'"><strong>'+e(entry.value.name)+' · '+e(entry.value.rank)+'</strong>'+
-   '<small>'+e(officerStatusLabel(entry.value.lifecycle))+(entry.value.blacklisted?' · Blacklist':'')+' · zuletzt '+e(entry.value.last_seen||'?')+'</small></button>':
+   '<small>'+e(entry.value.lifecycle)+(entry.value.blacklisted?' · BLACKLIST':'')+' · zuletzt '+e(entry.value.last_seen||'?')+'</small></button>':
   '<div class="native-archive-row native-registry-archive-row"><strong>'+e(entry.value.name)+'</strong>'+
    '<small>'+trans('Zugfahrt')+' · '+entry.value.ride_count+'×'+
    (entry.value.dates.length?' · '+e(entry.value.dates.join(', ')):'')+'</small></div>'
@@ -1508,10 +1753,11 @@ function editRegistry(target,id){
   return;
  }
  const ranks=canManageSite()?['R1','R2','R3','R4','R5']:['R1','R2','R3'];
- host.innerHTML='<form id="registry-save" class="native-form" data-id="'+e(id)+'" data-revision="'+e(m.revision)+'"><h3>'+e(m.name)+' verwalten</h3>'+
+ host.innerHTML='<form id="registry-save" class="native-form" data-id="'+e(id)+'" data-revision="'+e(m.revision)+'" data-lifecycle="'+e(m.lifecycle)+'"><h3>'+e(m.name)+' verwalten</h3>'+
   '<label>Verwalteter Rang<select name="rank" required>'+(!m.rank?'<option value="" selected disabled>Rang verifizieren</option>':'')+ranks.map(x=>'<option '+(m.rank===x?'selected':'')+'>'+x+'</option>').join('')+'</select></label>'+
   '<label>Status<select name="lifecycle" required>'+(m.lifecycle==='unverified'?'<option value="" selected disabled>Identität / Status verifizieren</option>':'')+'<option value="active" '+(m.lifecycle==='active'?'selected':'')+'>Aktiv</option><option value="former" '+(m.lifecycle==='former'?'selected':'')+'>Ehemalig / Archiv</option></select></label>'+
-  '<div class="native-row"><button type="button" data-native-registry-quick="archive">Ins Archiv vormerken</button><button type="button" data-native-registry-quick="blacklist">Blacklist vormerken</button><button type="button" data-native-registry-quick="active">Aktiv vormerken</button></div>'+
+  '<div class="native-row"><button type="button" data-native-registry-quick="archive">Austritt best\u00e4tigen</button><button type="button" data-native-registry-quick="blacklist">Blacklist vormerken</button><button type="button" data-native-registry-quick="active">Aktiv vormerken</button></div>'+
+  '<fieldset><legend>Manuell best\u00e4tigter Austritt / R\u00fcckkehr</legend><label>Austrittsart<select name="departure_event"><option value="">Bitte ausw\u00e4hlen</option><option value="left">Selbst verlassen</option><option value="removed">Entfernt</option><option value="kicked">Gekickt</option></select></label><label>Gepr\u00fcfte Quelle<input name="departure_source" minlength="8" maxlength="500" placeholder="Allianzprotokoll / Datum / genauer Beleg"></label><label><input type="checkbox" name="source_checked"> Quelle pers\u00f6nlich gepr\u00fcft</label><label><input type="checkbox" name="departure_confirmed"> Austritt oder R\u00fcckkehr dieser Person ausdr\u00fccklich best\u00e4tigen</label><p>Nullwerte und fehlende VS-Werte sind kein Austrittsbeleg. Die bestehende Mitglieder-ID und Historie bleiben erhalten.</p></fieldset>'+
   '<label class="native-check"><input type="checkbox" name="blacklisted" '+(m.blacklisted?'checked':'')+'>Manuelle Blacklist</label>'+
   '<label>Begründung<input name="reason" required minlength="8" maxlength="500" value="'+e(m.reason)+'" placeholder="Für jede Änderung erforderlich (mindestens 8 Zeichen)"></label>'+
   '<button type="submit">Änderung protokolliert speichern</button><button type="button" data-registry-reload hidden>Aktuellen Stand laden (Eingaben verwerfen)</button><p id="native-form-message" role="status"></p></form>';
@@ -1548,8 +1794,7 @@ export function auditChanges(entry){
  if(!after)return [];
  return Object.keys(auditLabels).filter(key=>Object.hasOwn(after,key)&&
   (!before||JSON.stringify(before[key])!==JSON.stringify(after[key]))).map(key=>({
-  field:auditLabels[key],before:['status','lifecycle'].includes(key)&&before?.[key]!=null?officerStatusLabel(before[key]):auditValue(before?.[key]),
-  after:['status','lifecycle'].includes(key)?officerStatusLabel(after[key]):auditValue(after[key])
+  field:auditLabels[key],before:auditValue(before?.[key]),after:auditValue(after[key])
  }));
 }
 const activityTypes=[
@@ -1644,10 +1889,136 @@ function renderActivity(target,term=''){
 }
 // Evidence never receives a public URL. A protected Blob URL exists only for the
 // current officer's in-memory session and is revoked on navigation/logout.
+// Publication reviews deliberately do not share OCR cases, counters or evidence state.
+const sourceImages=new Set();
+function clearSourceImages(){for(const url of sourceImages)URL.revokeObjectURL(url);sourceImages.clear()}
+export function sourceDecisionBody(item,input,verified,members){
+ if(!item.source_archive_id||! /^[a-f0-9]{64}$/i.test(item.image_sha256||'')||!Number.isFinite(item.row_y)||item.row_y<0||item.row_y>1200)throw Error('Originalquelle unvollst\u00e4ndig.');
+ if(!verified)throw Error('Originalbild und Zeilenposition zuerst prüfen.');
+ if(!members.some(m=>m.id===input.member_id))throw Error('Bestehende Mitglied-ID ausdrücklich auswählen.');
+ const value=reviewNumericValue(input.value);
+ if(value===null)throw Error('Exakten Wert eingeben; unbekannt bleibt unbekannt.');
+ if(input.reason.trim().length<8)throw Error('Prüfgrund mit mindestens 8 Zeichen eingeben.');
+ if(!input.confirmed)throw Error('Bild und genauen Wert ausdrücklich bestätigen.');
+ const body={row_key:item.row_key,member_id:input.member_id,value,reason:input.reason.trim(),sha256:item.image_sha256,row_y:item.row_y,source_archive_id:item.source_archive_id};
+ // A later-created database profile is not a verified join date. Only an
+ // explicitly checked R4/R5 observation of this exact original may attest
+ // historical presence; the server independently rejects contrary game logs.
+ if(input.historical_presence_confirmed===true)body.historical_presence_confirmed=true;
+ if(!Number.isInteger(item.rank)||item.rank<1||item.rank>200){
+  if(!String(input.rank??'').trim()||!Number.isInteger(Number(input.rank))||Number(input.rank)<1||Number(input.rank)>200||!input.rank_visually_confirmed)throw Error('Rang im Originalbild visuell bestätigen.');
+  body.rank=Number(input.rank);body.rank_visually_confirmed=true;
+ }
+ return body;
+}
+export async function verifySourceBytes(response,item){
+ if(!/^[a-f0-9]{64}$/i.test(item.image_sha256||'')||!Number.isFinite(item.row_y)||item.row_y<0||item.row_y>1200)throw Error('Quell-Prüfsumme oder Zeilenposition fehlt.');
+ if(response.headers.get('X-Evidence-SHA256')?.toLowerCase()!==item.image_sha256.toLowerCase()||response.headers.get('X-Evidence-Row-Y')===null||Number(response.headers.get('X-Evidence-Row-Y'))!==item.row_y)throw Error('Beleg-Header stimmen nicht überein (SHA/Zeile).');
+ const bytes=await response.arrayBuffer();
+ const sha=Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256',bytes)),v=>v.toString(16).padStart(2,'0')).join('');
+ if(sha!==item.image_sha256.toLowerCase())throw Error('Originalbild: SHA-256 stimmt nicht überein.');
+ if(!/^image\/(png|jpeg|webp)$/.test(response.headers.get('Content-Type')?.split(';')[0]||''))throw Error('Originalbildformat nicht unterstützt.');
+ return new Blob([bytes],{type:response.headers.get('Content-Type')});
+}
+function initSourceReviews(host){
+ const generation=sessionGeneration;
+ let offset=0,decisionOffset=0,epoch=0;
+ const live=()=>host.isConnected&&panel==='reviews'&&generation===sessionGeneration;
+ host.innerHTML='<h2>Source publication reviews</h2><p>Save a decision, then apply it separately. OCR cases and unknown donation values are counted independently. Unknown never means confirmed zero.</p><form data-source-filters class="native-row"><label>Week<input name="week" type="week"></label><label>Kind<select name="kind"><option value="">All</option><option value="profile">Profile</option><option value="vs">VS</option></select></label><label>Metric<select name="metric"><option value="">All</option><option>power</option><option>kills</option><option>donations_weekly</option><option>vs_day_0</option><option>vs_day_1</option><option>vs_day_2</option><option>vs_day_3</option><option>vs_day_4</option><option>vs_day_5</option></select></label><button>Load filters</button></form><p data-source-status role="status" aria-live="polite"></p><div data-source-list></div><button type="button" data-source-more>More cases (25)</button><h3>Saved decisions</h3><div data-source-decisions></div><button type="button" data-source-decisions-more>More saved decisions (25)</button>';
+ const status=host.querySelector('[data-source-status]'),form=host.querySelector('form');
+ let pendingBusy=false,savedBusy=false;
+ async function loadPending(append=false){
+  if(pendingBusy)return;
+  pendingBusy=true;const version=epoch;
+  const params=new URLSearchParams({limit:'25',offset:String(offset)});
+  for(const key of ['week','kind'])if(form.elements[key].value)params.set(key,form.elements[key].value);
+  const more=host.querySelector('[data-source-more]');more.disabled=true;
+  try{
+   const pending=await request('/api/capture-publication-review?'+params);
+   if(!live()||version!==epoch)return;
+   if(!append)host.querySelector('[data-source-list]').replaceChildren();
+   status.textContent=(cache.reviews||[]).length+' OCR open; '+(pending.total_pending??'unbekannt')+' source reviews pending. Metric filter covers loaded pages; load more cases.';
+   for(const item of pending.items||[])if(!form.elements.metric.value||item.metric===form.elements.metric.value)renderSourceCard(host.querySelector('[data-source-list]'),item,pending.member_options||[],false,live);
+   offset+=(pending.items||[]).length;
+   more.disabled=offset>=pending.total_pending||(pending.items||[]).length===0;
+  }catch(err){if(live()&&version===epoch)status.textContent='Source reviews unavailable: '+err.message}
+  finally{pendingBusy=false}
+ }
+ async function loadSaved(append=false){
+  if(savedBusy)return;
+  savedBusy=true;const version=epoch;
+  const params=new URLSearchParams({limit:'25',offset:String(decisionOffset)});
+  for(const key of ['week','kind'])if(form.elements[key].value)params.set(key,form.elements[key].value);
+  const more=host.querySelector('[data-source-decisions-more]');more.disabled=true;
+  try{
+   const saved=await request('/api/capture-publication-review/decisions?'+params);
+   if(!live()||version!==epoch)return;
+   if(!append)host.querySelector('[data-source-decisions]').replaceChildren();
+   for(const item of saved.items||[])if(!form.elements.metric.value||item.metric===form.elements.metric.value)renderSourceCard(host.querySelector('[data-source-decisions]'),item,[],true,live);
+   decisionOffset+=(saved.items||[]).length;more.disabled=(saved.items||[]).length<25;
+  }catch(err){if(live()&&version===epoch)host.querySelector('[data-source-decisions]').textContent='Saved decisions unavailable: '+err.message}
+  finally{savedBusy=false}
+ }
+ form.addEventListener('submit',event=>{event.preventDefault();if(pendingBusy||savedBusy)return;epoch++;offset=0;decisionOffset=0;clearSourceImages();host.querySelector('[data-source-list]').replaceChildren();host.querySelector('[data-source-decisions]').replaceChildren();void loadPending();void loadSaved()});
+ host.querySelector('[data-source-more]').onclick=()=>void loadPending(true);
+ host.querySelector('[data-source-decisions-more]').onclick=()=>void loadSaved(true);
+ void loadPending();void loadSaved();
+}
+function renderSourceCard(list,item,members,saved,live){
+ const card=list.ownerDocument.createElement('details');card.className='native-source-card';
+ const evidence=saved?{image_sha256:item.source_sha256,row_y:item.source_row_y}:item;
+ let verified=false,busy=false,completed=false,imageVersion=0;
+ const url='/api/capture-publication-review/'+encodeURIComponent(item.batch_id);
+ card.innerHTML='<summary>'+e(item.source_name||item.row_key)+' / '+e(item.week)+' / '+e(item.metric)+' / '+e(item.proposed_value??'unbekannt')+'</summary><p data-native-no-translate>'+e(item.source_path)+' | SHA-256: '+e(item.image_sha256)+' | '+e(item.source_status)+'</p><button type="button" data-source-image>Originalbild prüfen / Verify source</button><div class="native-source-image"></div><form class="native-source-form"><label>Mitglied / Immutable member ID<select name="member_id" required><option value="">Bitte ausdrücklich auswählen</option>'+members.map(m=>'<option value="'+e(m.id)+'">'+e(m.name)+' / '+e(m.rank)+' / '+e(m.status)+' / '+e(m.id)+' / '+e(m.history?JSON.stringify(m.history):'Historische Berechtigung wird serverseitig geprüft')+'</option>').join('')+'</select></label><label>Exakter Wert / Exact value<input name="value" inputmode="numeric" required></label><label>Prüfgrund / Reason<input name="reason" minlength="8" maxlength="500" required></label>'+(!Number.isInteger(item.rank)||item.rank<1||item.rank>200?'<label>Tabellenplatz im Originalbild (1-200)<input type="number" name="rank" min="1" max="200" step="1" required></label><label><input type="checkbox" name="rank_confirmed"> Rang visuell bestätigt / Rank visually confirmed</label>':'<p>Quellrang: '+e(item.rank)+'</p>')+'<label class="native-source-historical-confirm"><input type="checkbox" name="historical_presence_confirmed"> Historische Anwesenheit bestätigen / Confirm historical presence: Nur auswählen, wenn genau dieser Spieler trotz späterer Profilerfassung auf dem Originalbild nachweisbar ist. Keine ähnlichen Namen zusammenführen.</label><label><input type="checkbox" name="confirmed"> Originalbild, Zeile, Mitglied und exakten Wert visuell bestätigt / Confirm</label><button type="submit" disabled>'+ (saved?'Geprüften Wert in Bericht übernehmen':'Entscheidung speichern')+'</button></form><p data-source-message role="status" aria-live="polite"></p>';
+ list.append(card);
+ if(saved){
+  card.innerHTML='<summary>Gespeicherte Entscheidung / '+e(item.name||item.chosen_member_id)+' / '+e(item.chosen_value)+'</summary><p>Mitglied: '+e(item.name||'')+' / '+e(item.chosen_member_id)+' / Wert: '+e(item.chosen_value)+'</p><p>SHA-256: '+e(item.source_sha256)+' / Y: '+e(item.source_row_y)+'</p><p>'+e(item.reason)+' / '+e(item.decided_at)+' / '+e(item.stage)+'</p>'+(item.stage==='APPLIED'?'<p>\u00dcbernahme abgeschlossen.</p>':'<button type="button" data-source-image>Originalbild pr\u00fcfen</button><div class="native-source-image"></div><form><label><input type="checkbox" name="confirmed"> Gespeicherte Entscheidung mit Originalbild und markierter Zeile gepr\u00fcft</label><button type="submit" disabled>Gepr\u00fcften Wert in Bericht \u00fcbernehmen</button></form>')+'<p data-source-message role="status" aria-live="polite"></p>';
+  if(item.stage==='APPLIED')return;
+ }
+ const form=card.querySelector('form'),button=form.querySelector('button'),message=card.querySelector('[data-source-message]');
+ if(!saved&&(item.source_available===false||!item.source_archive_id))card.querySelector('[data-source-image]').disabled=true;
+ card.querySelector('[data-source-image]').onclick=async()=>{
+  if(busy||completed)return;
+  const version=++imageVersion;
+  verified=false;button.disabled=true;form.elements.confirmed.checked=false;if(form.elements.historical_presence_confirmed)form.elements.historical_presence_confirmed.checked=false;
+  try{
+   if(item.source_available===false)throw Error('Originalquelle fehlt.');
+   const response=await binaryRequest(url+'/image?'+new URLSearchParams({row_key:item.row_key}),{raw:true});
+   const blob=await verifySourceBytes(response,evidence);
+   if(!live()||!card.isConnected||version!==imageVersion)return;
+   const objectURL=URL.createObjectURL(blob);sourceImages.add(objectURL);
+   const frame=card.querySelector('.native-source-image');frame.replaceChildren();
+   const image=card.ownerDocument.createElement('img');image.alt='Vollständiges unverändertes Originalbild';
+   image.onload=()=>{if(!live()||!card.isConnected||version!==imageVersion)return;if(!image.naturalHeight||evidence.row_y>=image.naturalHeight){message.textContent='Zeilenposition außerhalb des Originalbildes.';return}const marker=card.ownerDocument.createElement('span');marker.className='native-source-marker';marker.textContent='Y '+evidence.row_y;marker.style.top=(100*evidence.row_y/image.naturalHeight)+'%';marker.setAttribute('aria-label','Zu prüfende Quellzeile');frame.append(marker);verified=true;button.disabled=false;message.textContent='Original-SHA und Zeilenposition verifiziert. Bitte visuell prüfen.'};
+   image.onerror=()=>{if(!live()||version!==imageVersion)return;verified=false;button.disabled=true;message.textContent='Originalbild kann nicht angezeigt werden.'};image.src=objectURL;frame.append(image);
+  }catch(err){if(live())message.textContent=err.message}
+ };
+ form.onsubmit=async event=>{
+  event.preventDefault();if(busy||completed||!live()||!card.isConnected)return;
+  try{
+   const body=saved?{row_key:item.row_key,member_id:item.chosen_member_id,value:item.chosen_value}:sourceDecisionBody(item,{member_id:form.elements.member_id.value,value:form.elements.value.value,reason:form.elements.reason.value,confirmed:form.elements.confirmed.checked,historical_presence_confirmed:form.elements.historical_presence_confirmed?.checked===true,rank:form.elements.rank?.value,rank_visually_confirmed:form.elements.rank_confirmed?.checked},verified,members);
+   if(saved&&(!verified||!form.elements.confirmed.checked))throw Error('Originalbild und gespeicherte Entscheidung best\u00e4tigen.');
+   busy=true;button.disabled=true;
+   if(saved){
+    const result=await request(url+'/apply',{method:'POST',body:{row_key:item.row_key}});
+    if(!live()||!card.isConnected)return;
+    if(result.state!=='APPLIED'||result.applied_to_report!==true||(typeof result.audit_id!=='string'||!result.audit_id.trim())||result.batch_id!==item.batch_id||result.row_key!==body.row_key||result.member_id!==body.member_id||result.value!==body.value)throw Error('Übernahme nicht vollständig bestätigt. Status vor erneutem Versuch prüfen.');
+    completed=true;verified=false;
+    cache.vs=null;cache.donations=null;cache.members=null;
+    message.textContent='Übernahme vom Server bestätigt. Bericht wird beim nächsten öffnen neu geladen.';
+    card.querySelector('[data-source-image]').disabled=true;
+   }else{
+    const result=await request(url+'/decision',{method:'POST',body});
+    if(!live()||!card.isConnected)return;
+    if(result.ok!==true||result.state!=='verified_pending_application'||result.applied_to_report!==false||result.batch_id!==item.batch_id||result.row_key!==body.row_key||result.member_id!==body.member_id||result.value!==body.value)throw Error('Entscheidung nicht vollständig bestätigt. Vor erneutem Versuch neu laden.');
+    completed=true;verified=false;card.querySelector('[data-source-image]').disabled=true;message.textContent='Entscheidung gespeichert. Filter neu laden und unter "Gespeichert" erneut visuell prüfen, bevor der Bericht geändert wird.';
+   }
+  }catch(err){if(live())message.textContent=err.message;if(busy){completed=true;verified=false;card.querySelector('[data-source-image]').disabled=true}button.disabled=!verified}finally{busy=false}
+ };
+}
 const reviewBlobUrls=new Map();
 const selectedProfileCaptures=new Map();
 function clearReviewImages(){
- vsDialogRelease?.();vsDialogRelease=null;
  for(const url of reviewBlobUrls.values())try{URL.revokeObjectURL(url)}catch{}
  reviewBlobUrls.clear();
  selectedProfileCaptures.clear();
@@ -1660,7 +2031,7 @@ export function reviewNumericValue(raw){
  const text=String(raw??'').trim().replace(/[\s.,]/g,'');
  if(!/^\d{1,15}$/.test(text))return null;
  const value=Number(text);
- return Number.isSafeInteger(value)&&value<=1e14?value:null;
+ return Number.isSafeInteger(value)&&value<=9999999999999?value:null;
 }
 function reviewMemberOptions(card,term){
  const root=card.querySelector('.native-review-people');
@@ -1720,6 +2091,7 @@ function renderReviews(target,term=''){
  const names={vs_uncertain:'VS-Tageswert',inferred:'Wert nicht sicher',unmatched_name:'Spieler zuordnen',
   historical_identity:'Namenszuordnung',missing:'Fehlender Wert',ocr_alert:'Bild erkennen'};
  const card=x=>{
+  if(x.kind==='lw_import')return lwReviewCard(x,writesEnabled);
   const identity=x.kind==='identity',numeric=x.kind==='profile'||x.kind==='vs_day';
   const linked=Boolean(x.evidence_sha);
   return '<details class="native-review-card" data-evidence="'+(linked?'with':'without')+'" data-review-id="'+e(x.id)+'" data-review-kind="'+e(x.kind||'')+'">'+
@@ -1767,6 +2139,9 @@ function renderReviews(target,term=''){
   '<div class="native-review-cards">'+list.slice(0,historyLimit).map(card).join('')+'</div>'+
   (list.length>historyLimit?'<button data-native-more="reviews">Weitere Fälle</button>':'');
  host.querySelectorAll('.native-review-card').forEach(card=>{
+  if(card.dataset.reviewKind==='lw_import'){
+   card.querySelector('[data-lw-review-form]')?.addEventListener('submit',saveLwReview);return;
+  }
   card.addEventListener('toggle',()=>{
    if(card.open){
     loadReviewImage(card);
@@ -1944,6 +2319,7 @@ async function completeReview(card,action){
 }
 
 export async function renderNativeAdmin(mount){
+ if(mount.ownerDocument.defaultView?.location.hash==='#review')panel='reviews';
  if(!sessionToken){
   mount.innerHTML='<section class="native-admin native-login"><div><span class="admin-eyebrow">RZSN / R4–R5</span><h1>Command Center</h1><p>Melde dich mit deinem Offizierscode an. Alle privaten Daten bleiben bei Cloudflare.</p><form id="native-officer-login"><label>Offizierscode<input type="password" name="code" autocomplete="off" required placeholder="RZSN-…"></label><button type="submit">Anmelden</button><p id="native-login-status" role="status"></p></form></div></section>';
   localizeOfficerTree(mount);
@@ -1952,6 +2328,7 @@ export async function renderNativeAdmin(mount){
  await view(mount);
  localizeOfficerTree(mount);
 }
+export async function openNativeReviews(mount){panel='reviews';if(sessionToken)await renderNativeAdmin(mount)}
 export function initNativeAdmin(mount){
  if(mount.dataset.nativeReady)return;
  mount.dataset.nativeReady='1';
@@ -1998,9 +2375,7 @@ export function initNativeAdmin(mount){
    renderDonations(target,null,'#native-donation-results-title');
    target.querySelector('#native-donation-results-title')?.scrollIntoView?.({block:'nearest'});return;
   }
-  if(event.target.closest?.('[data-native-nav-back]')){
-   const entry=navigationTrail.pop();if(entry)restoreView(mount,entry);return;
-  }
+
   if(event.target.closest?.('.native-train-history > summary')){
    trainHistoryExpanded=!event.target.closest('.native-train-history').open;
    return;
@@ -2021,7 +2396,7 @@ export function initNativeAdmin(mount){
   const proof=event.target.closest?.('[data-native-stat-evidence],[data-native-stat-close],[data-native-stat-prev],[data-native-stat-next],[data-native-stat-link],[data-native-stat-browse]');
   if(proof){
    const area=mount.querySelector('#native-admin-content');
-   if(proof.dataset.nativeStatEvidence)await statViewer.open(area,proof.dataset.nativeStatEvidence,proof.dataset.nativeStatMemberName,proof);
+   if(proof.dataset.nativeStatEvidence)await statViewer.open(area,proof.dataset.nativeStatEvidence);
    else if(proof.hasAttribute('data-native-stat-close'))statViewer.close(area);
    else if(proof.hasAttribute('data-native-stat-browse'))await statViewer.step(0);
    else if(proof.hasAttribute('data-native-stat-prev'))await statViewer.step(-1);
@@ -2035,7 +2410,7 @@ export function initNativeAdmin(mount){
    if(url.startsWith('blob:'))window.open(url,'_blank','noopener,noreferrer');
    return;
   }
-  const button=event.target.closest('[data-officer-tab],[data-officer-logout],[data-native-member],[data-native-more],[data-native-train],[data-native-new],[data-native-edit],[data-native-refresh],[data-registry-edit],[data-registry-reload],[data-native-action],[data-native-manage],[data-native-member-log],[data-native-member-close],[data-native-add-absence],[data-native-form-reload],[data-native-copy-train],[data-native-event-quick],[data-native-watch-person],[data-native-diplomacy-new],[data-native-diplomacy-edit],[data-native-diplomacy-cancel],[data-native-diplomacy-reload],[data-native-registry-filter],[data-native-review-pick],[data-native-review-upload],[data-native-review-resolve],[data-native-mark-zero],[data-native-capture-preview],[data-native-capture-attach],[data-native-review-replace],[data-native-rotation-reload],[data-native-task-toggle],[data-native-record-delete],[data-native-dice-date],[data-native-dice-delete],[data-native-train-choice],[data-native-history-reset],[data-native-access-mode],[data-native-access-copy],[data-native-access-signout],[data-native-member-create],[data-native-registry-quick],[data-native-access-link],[data-native-access-disable],[data-audit-category],[data-native-vs-image],[data-native-vs-image-close],[data-native-requirements-reload]');
+  const button=event.target.closest('[data-officer-tab],[data-officer-logout],[data-native-member],[data-native-more],[data-native-train],[data-native-new],[data-native-edit],[data-native-refresh],[data-registry-edit],[data-registry-reload],[data-native-action],[data-native-manage],[data-native-member-log],[data-native-member-close],[data-native-add-absence],[data-native-form-reload],[data-native-copy-train],[data-native-event-quick],[data-native-watch-person],[data-native-watch-archive],[data-native-diplomacy-new],[data-native-diplomacy-edit],[data-native-diplomacy-cancel],[data-native-diplomacy-reload],[data-native-registry-filter],[data-native-review-pick],[data-native-review-upload],[data-native-review-resolve],[data-native-mark-zero],[data-native-capture-preview],[data-native-capture-attach],[data-native-review-replace],[data-native-rotation-reload],[data-native-task-toggle],[data-native-record-delete],[data-native-dice-date],[data-native-dice-delete],[data-native-train-choice],[data-native-history-reset],[data-native-access-mode],[data-native-access-copy],[data-native-access-signout],[data-native-member-create],[data-native-registry-quick],[data-native-access-link],[data-native-access-disable],[data-audit-category],[data-native-vs-image],[data-native-vs-image-close],[data-native-requirements-reload]');
   if(!button)return;
   if(button.hasAttribute('data-native-history-reset')){
    trainHistoryFilters={member:'',date:''};historyLimit=20;
@@ -2049,17 +2424,11 @@ export function initNativeAdmin(mount){
   if(button.hasAttribute('data-native-requirements-reload')){
    cache.requirements=await request('/api/alliance-requirements');renderRequirements(mount.querySelector('#native-admin-content'));return
   }
-  if(button.dataset.officerTab){
-   const next=button.dataset.officerTab;
-   if(secondaryPanels.some(([key])=>key===next)&&next!==panel){
-    navigationTrail.push(rememberView(mount,button));if(navigationTrail.length>12)navigationTrail.shift();navigationGroup=parentPanel(panel);
-   }else{navigationTrail=[];navigationGroup=null;}
-   profileReturn=null;panel=next;pageLimit=20;historyLimit=20;activityLimit=30;await view(mount);
+  if(button.dataset.officerTab){panel=button.dataset.officerTab;pageLimit=20;historyLimit=20;activityLimit=30;await view(mount);
    if(panel==='more')mount.querySelector('.native-hub-section h3')?.focus();
    return}
   if(button.dataset.nativeAction){
    const action=button.dataset.nativeAction;
-   navigationTrail=[];navigationGroup=null;profileReturn=null;
    panel=({ 'train-today':'train','event-planning':'events','member-find':'members','review-open':'reviews','tasks-open':'tasks','absences-open':'absences','vs-open':'vs','donations-open':'donations'})[action]||'overview';
    pageLimit=20;historyLimit=20;await view(mount);
    const destination=mount.querySelector('#native-admin-content');
@@ -2068,7 +2437,7 @@ export function initNativeAdmin(mount){
    if(action==='member-find')destination.querySelector('#native-member-search')?.focus();
    return;
   }
-  if(button.hasAttribute('data-native-refresh')){invalidateOfficerReads();await view(mount);return}
+  if(button.hasAttribute('data-native-refresh')){await view(mount);return}
   if(button.dataset.nativeTaskToggle){
    const row=(cache.ops?.tasks||[]).find(x=>x.id===button.dataset.nativeTaskToggle);
    if(!row)return;
@@ -2104,11 +2473,10 @@ export function initNativeAdmin(mount){
   const target=mount.querySelector('#native-admin-content');if(!target)return;
   if(button.hasAttribute('data-native-vs-image-close')){
    const modal=target.querySelector('#native-vs-evidence-viewer');modal?.remove();
-   vsDialogRelease?.();vsDialogRelease=null;
    for(const [key,url] of reviewBlobUrls)if(key.startsWith('vs:')){URL.revokeObjectURL(url);reviewBlobUrls.delete(key)}
    return;
   }
-  if(button.dataset.nativeVsImage){await openVsScreenshot(target,button.dataset.nativeVsImage,button);return}
+  if(button.dataset.nativeVsImage){await openVsScreenshot(target,button.dataset.nativeVsImage);return}
   if(button.dataset.nativeRegistryFilter){
    registryFilter=button.dataset.nativeRegistryFilter;
    target.querySelectorAll('[data-native-registry-filter]').forEach(item=>
@@ -2127,10 +2495,18 @@ export function initNativeAdmin(mount){
    }catch(err){form.querySelector('#native-form-message').textContent=err.message;button.disabled=false}
    return;
   }
+  if(button.dataset.nativeWatchArchive){
+   const id=button.dataset.nativeWatchArchive;panel='registry';registryFilter='all';await view(mount);
+   const registryTarget=mount.querySelector('#native-admin-content');
+   if(registryTarget?.querySelector('#registry-form')){
+    editRegistry(registryTarget,id);
+    const form=registryTarget.querySelector('#registry-save');
+    if(form){form.elements.namedItem('lifecycle').value='former';form.elements.namedItem('departure_event').focus()}
+   }
+   return;
+  }
   if(button.dataset.nativeWatchPerson){
    const id=button.dataset.nativeWatchPerson;
-   profileReturn=rememberView(mount,button);
-   profileReturn.trail=navigationTrail;navigationTrail=[];navigationGroup=null;
    panel='members';await view(mount);
    const memberTarget=mount.querySelector('#native-admin-content');
    if(memberTarget?.querySelector('#native-person'))await showPerson(memberTarget,id);
@@ -2156,7 +2532,7 @@ export function initNativeAdmin(mount){
   if(button.dataset.nativeRegistryQuick){
    const form=button.closest('#registry-save');if(!form)return;
    const status=form.elements.namedItem('lifecycle'),blacklist=form.elements.namedItem('blacklisted');
-   if(button.dataset.nativeRegistryQuick==='archive')status.value='former';
+   if(button.dataset.nativeRegistryQuick==='archive'){status.value='former';form.elements.namedItem('departure_event').focus();return}
    if(button.dataset.nativeRegistryQuick==='blacklist')blacklist.checked=true;
    if(button.dataset.nativeRegistryQuick==='active'){status.value='active';blacklist.checked=false}
    form.elements.namedItem('reason').focus();return;
@@ -2173,21 +2549,17 @@ export function initNativeAdmin(mount){
   }
   if(button.dataset.registryEdit){editRegistry(target,button.dataset.registryEdit);return}
   if(button.dataset.nativeMember){
-   if(!profileReturn)profileReturn=rememberView(mount,button);
    if(panel!=='members'){
-    profileReturn.trail=navigationTrail;navigationTrail=[];navigationGroup=null;
     const id=button.dataset.nativeMember;panel='members';await view(mount);
     await showPerson(mount.querySelector('#native-admin-content'),id);
    }else await showPerson(target,button.dataset.nativeMember);
    return;
   }
   if(button.hasAttribute('data-native-member-close')){
-   if(profileReturn?.panel!=='members'&&profileReturn){const entry=profileReturn;profileReturn=null;restoreView(mount,entry);return;}
    const node=target.querySelector('#native-person');if(node)node.innerHTML='';
    const roster=target.querySelector('.native-member-folds');if(roster)roster.hidden=false;
    const header=target.querySelector('.native-row');if(header)header.hidden=false;
-   if(profileReturn){returnFocus(mount,profileReturn);profileReturn=null;}
-   else target.querySelector('#native-member-search')?.focus();return;
+   target.querySelector('#native-member-search')?.focus();return;
   }
   if(button.dataset.nativeAddAbsence){editProfileAbsence(target,button.dataset.nativeAddAbsence);return}
   if(button.dataset.nativeManage){
@@ -2202,13 +2574,7 @@ export function initNativeAdmin(mount){
   if(button.dataset.nativeMemberLog){
    const holder=target.querySelector('#native-person-log');
    if(!holder)return;
-   holder.textContent='Änderungen werden geladen …';
-   try{
-    const history=await request('/api/activity?limit=100&member_id='+encodeURIComponent(button.dataset.nativeMemberLog));
-    holder.innerHTML='<h4 class="native-section-heading">Änderungsprotokoll</h4>'+
-     (history.length?'<div class="native-activity-brief">'+history.map(item=>
-      '<p><b>'+e(item.actor)+'</b> · '+e(item.action)+' · '+e(formatOfficerTime(item.at))+'</p>').join('')+'</div>':'<p class="native-muted">Noch keine protokollierten Änderungen zu dieser Spieler-ID.</p>');
-   }catch(err){holder.textContent='Protokoll nicht verfügbar: '+err.message}
+   await loadMemberActivity(holder,button.dataset.nativeMemberLog);
    return;
   }
   if(button.dataset.nativeMore==='members'){pageLimit+=20;renderMembers(target,target.querySelector('#native-member-search')?.value||'');return}
@@ -2300,7 +2666,6 @@ export function initNativeAdmin(mount){
   if(button.dataset.nativeNew||button.dataset.nativeEdit){editRecord(target,panel,button.dataset.nativeEdit||'');return}
  });
  mount.addEventListener('input',event=>{
-  if(event.target.id==='native-vs-search'){filterVsMembers(mount.querySelector('#native-admin-content'));return;}
   if(event.target.id==='native-train-history-member'||event.target.id==='native-train-history-date'){
    trainHistoryFilters[event.target.id==='native-train-history-member'?'member':'date']=event.target.value;
    historyLimit=20;updateTrainHistoryResults(mount.querySelector('#native-admin-content'));return;
@@ -2309,6 +2674,7 @@ export function initNativeAdmin(mount){
   if(event.target.id==='registry-search'){pageLimit=20;renderRegistry(mount.querySelector('#native-admin-content'),event.target.value)}
   if(event.target.id==='native-diplomacy-search')renderDiplomacy(mount.querySelector('#native-admin-content'),event.target.value);
   if(event.target.id==='activity-search'){activityLimit=30;renderActivity(mount.querySelector('#native-admin-content'),event.target.value)}
+  if(event.target.id==='native-vs-search')filterVsMembers(mount.querySelector('#native-admin-content'));
   if(event.target.id==='native-donation-search')renderDonations(mount.querySelector('#native-admin-content'),event.target.value);
   if(event.target.id==='review-search-native'){historyLimit=20;renderReviews(mount.querySelector('#native-admin-content'),event.target.value)}
   if(event.target.matches('[data-native-review-search]')){
@@ -2317,6 +2683,15 @@ export function initNativeAdmin(mount){
   }
  });
  mount.addEventListener('change',event=>{
+  if(event.target.id==='native-train-history-date'){
+   trainHistoryFilters.date=event.target.value;historyLimit=20;updateTrainHistoryResults(mount.querySelector('#native-admin-content'));return;
+  }
+  if(event.target.matches('[data-native-capture-choice]')){
+   const card=event.target.closest('.native-review-card');
+   if(card){selectedProfileCaptures.delete(card.dataset.reviewId);const attach=card.querySelector('[data-native-capture-attach]');if(attach)attach.disabled=true;
+    const message=card.querySelector('.native-review-message');if(message)message.textContent='Andere Aufnahme gewählt; bitte zuerst öffnen und kontrollieren.'}
+  }
+ if(event.target.id==='activity-group-by'){activityGroupBy=event.target.value;activityLimit=30;renderActivity(mount.querySelector('#native-admin-content'),mount.querySelector('#activity-search')?.value||'')}
   if(event.target.id==='native-vs-sort'&&cache.vsView){
    const target=mount.querySelector('#native-admin-content');cache.vsView.sort=event.target.value;cache.vsView.limits={};
    cache.vsView.openGroups=[...target.querySelectorAll('[data-native-vs-group][open]')].map(node=>node.dataset.nativeVsGroup);renderVsResults(target,'#native-vs-sort');return;
@@ -2376,7 +2751,7 @@ export function initNativeAdmin(mount){
    form.querySelector('#native-login-status').textContent='Anmeldung wird geprüft …';
    try{
     const login=await request('/api/native-login',{method:'POST',body:{code:form.elements.namedItem('code').value}});
-    sessionGeneration++;invalidateOfficerReads();sessionToken=login.token;officer=login;form.elements.namedItem('code').value='';await view(mount);
+    sessionGeneration++;sessionToken=login.token;officer=login;form.elements.namedItem('code').value='';await view(mount);
    }catch(err){form.querySelector('#native-login-status').textContent=err.message;button.disabled=false}
    return;
   }
@@ -2512,11 +2887,30 @@ export function initNativeAdmin(mount){
   if(form.id==='registry-save'){
    if(form.dataset.conflict==='1'||form.querySelector('[type=submit]').disabled)return;
    const payload={member_id:form.dataset.id,revision:form.dataset.revision,rank:form.elements.namedItem('rank').value,lifecycle:form.elements.namedItem('lifecycle').value,blacklisted:form.elements.namedItem('blacklisted').checked,reason:form.elements.namedItem('reason').value};
-   if(!window.confirm('Mitgliedsänderung mit Audit-Log speichern?'))return;
+   const message=form.querySelector('#native-form-message');
+   if(payload.lifecycle!==form.dataset.lifecycle&&['active','former'].includes(form.dataset.lifecycle)){
+    Object.assign(payload,{transition:payload.lifecycle==='former'?'manual_confirmed_departure':'manual_verified_return',
+     source:form.elements.namedItem('departure_source').value.trim(),source_checked:form.elements.namedItem('source_checked').checked,
+     confirmed:form.elements.namedItem('departure_confirmed').checked,
+     ...(payload.lifecycle==='former'?{departure_event:form.elements.namedItem('departure_event').value}:{})});
+    if(payload.reason.trim().length<8||payload.source.length<8||!payload.source_checked||!payload.confirmed||payload.lifecycle==='former'&&!['left','removed','kicked'].includes(payload.departure_event)){
+     message.textContent='Nicht gespeichert: Quelle, Begründung, Austrittsart und ausdrückliche Bestätigung prüfen.';return;
+    }
+   }
+   if(!window.confirm('Mitgliedsänderung für '+(cache.registry?.members.find(m=>m.id===payload.member_id)?.name||payload.member_id)+' mit Audit-Log speichern?'))return;
    const button=form.querySelector('[type=submit]');button.disabled=true;
-   try{await request('/api/member-registry',{method:'POST',body:payload});await view(mount)}
+   message.textContent='Wird gespeichert und unabhängig geprüft …';
+   try{
+    await request('/api/member-registry',{method:'POST',body:payload});
+    if(payload.transition){
+     const [registry,members,watch]=await Promise.all([request('/api/member-registry'),request('/api/members'),request('/api/membership-watch')]);
+     verifyRegistryReadback(payload,registry,members);
+     cache.registry=registry;cache.members=members;cache.watch=watch;
+    }
+    await view(mount);
+   }
    catch(err){
-    form.querySelector('#native-form-message').textContent=err.status===409?'Der Mitgliedsstand wurde geändert. Deine Eingaben bleiben erhalten. Lade den aktuellen Stand vor einer neuen Änderung.':err.message;
+    form.querySelector('#native-form-message').textContent=err.status===409?'Nicht bestätigt (409): '+err.message+' Deine Eingaben bleiben erhalten. Lade den aktuellen Stand vor einer neuen Änderung.':'Nicht bestätigt'+(err.status?' ('+err.status+')':'')+': '+err.message;
     if(err.status===409){form.dataset.conflict='1';form.querySelector('[data-registry-reload]').hidden=false}
     else button.disabled=false;
    }return;
@@ -2524,4 +2918,12 @@ export function initNativeAdmin(mount){
   if(form.id==='native-train-save'){form.dataset.kind='train';await saveForm(mount,form)}
   if(form.id==='native-record-save')await saveForm(mount,form);
  });
+}
+
+/** Both authenticated projections must agree before a lifecycle change is shown as saved. */
+export function verifyRegistryReadback(payload,registry,members){
+ const member=registry?.members?.find(m=>m.id===payload.member_id);
+ const active=Array.isArray(members)&&members.some(m=>m.id===payload.member_id);
+ if(!member||member.lifecycle!==payload.lifecycle||!Array.isArray(members)||active!==(payload.lifecycle==='active'))
+  throw Error('Statusänderung noch nicht unabhängig bestätigt. Mitgliederbestand neu laden; nicht erneut blind speichern.');
 }
